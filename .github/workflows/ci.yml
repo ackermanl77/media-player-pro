@@ -27,10 +27,14 @@ jobs:
       # dejar que VLC autoseleccione un modulo de video real -- los nombres
       # de modulo "vdummy"/"adummy" no se resuelven igual en el VLC de los
       # repos de Ubuntu que en Windows.
+      # vlc-plugin-visualization trae el filtro "visual" (espectro de audio)
+      # que usa el visualizador: es una dependencia Recommends de vlc, y
+      # muchas imagenes de CI (incluida esta) traen APT::Install-Recommends
+      # en 0, asi que hay que pedirla explicitamente.
       - name: Install system dependencies (VLC + Qt runtime headless)
         run: |
           sudo apt-get update
-          sudo apt-get install -y vlc libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 xvfb
+          sudo apt-get install -y vlc vlc-plugin-visualization libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 xvfb
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
