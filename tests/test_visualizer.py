@@ -54,16 +54,21 @@ def _wait_until(predicate, timeout_s: float = 6.0, interval_s: float = 0.2) -> b
 
 def test_visualizer_enabled_produces_a_video_output_for_audio(tmp_path):
     wav_path = str(tmp_path / "tone.wav")
-    _make_test_wav(wav_path)
+    # Duracion generosa: bajo Xvfb con render por software, inicializar el
+    # contexto GL/EGL para el video generado por el filtro puede tardar
+    # ~2 segundos por si solo (una vez, al primer video output). Un wav
+    # corto puede terminar y desmontar el pipeline antes de que el vout
+    # llegue a existir, dando un falso negativo.
+    _make_test_wav(wav_path, duration=8.0)
 
     player = _headless_player()
     player.load(wav_path, enable_visualizer=True)
     player.play()
     try:
-        # Con el modulo de salida "vdummy" el tamaño reportado es (0, 0)
-        # aunque la salida de video este activa, asi que se comprueba
-        # has_vout() en lugar de has_video() (que ademas exige tamaño > 0).
-        assert _wait_until(player.has_active_video_output), "el visualizador no genero salida de video"
+        # has_video() ademas exige tamaño > 0, que algunos modulos de vout
+        # headless no reportan aunque la salida este realmente activa; se
+        # comprueba has_vout() directamente.
+        assert _wait_until(player.has_active_video_output, timeout_s=12.0), "el visualizador no genero salida de video"
     finally:
         player.stop()
 
