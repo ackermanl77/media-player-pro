@@ -362,6 +362,10 @@ class MainWindow(QMainWindow):
         act_eq.triggered.connect(self.open_equalizer)
         menu_audio.addAction(act_eq)
 
+        self.act_visualizer = QAction("Visualizador de audio (espectro)", self, checkable=True)
+        self.act_visualizer.setChecked(True)
+        menu_audio.addAction(self.act_visualizer)
+
         self.menu_audio_tracks = menu_audio.addMenu("Pistas de audio")
         self.menu_audio_tracks.aboutToShow.connect(self._populate_audio_track_menu)
 
@@ -512,7 +516,7 @@ class MainWindow(QMainWindow):
         self.current_index = index
         self.playlist_widget.setCurrentRow(index)
         self._advancing = False
-        self.player.load(path)
+        self.player.load(path, enable_visualizer=self.act_visualizer.isChecked())
         self.player.attach_video_output(self.video_frame)
         self.player.play()
         self.player.set_rate(self.speed_combo.currentData())

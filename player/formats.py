@@ -1,5 +1,7 @@
 """Extensiones de audio/video soportadas (todo lo que libVLC es capaz de decodificar)."""
 
+import os
+
 AUDIO_EXTS = {
     ".mp3", ".wav", ".flac", ".aac", ".ogg", ".oga", ".m4a", ".wma", ".opus",
     ".ape", ".aiff", ".aif", ".alac", ".dsf", ".dff", ".mid", ".midi",
@@ -21,6 +23,15 @@ STREAM_SCHEMES = ("http://", "https://", "rtsp://", "rtmp://", "rtmpe://", "mms:
 
 def is_url(path: str) -> bool:
     return path.lower().startswith(STREAM_SCHEMES)
+
+
+def is_audio_file(path: str) -> bool:
+    """True solo para archivos locales cuya extensión es de audio puro (no
+    video, no streams: para esos la presencia de video no se puede saber por
+    extensión, así que se dejan sin visualizador)."""
+    if is_url(path):
+        return False
+    return os.path.splitext(path)[1].lower() in AUDIO_EXTS
 
 
 def _pattern(exts):

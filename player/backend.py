@@ -2,26 +2,51 @@
 para maxima calidad y compatibilidad de formatos, aceleracion por hardware cuando
 el driver de video la soporta."""
 
+import os
 import sys
 
 import vlc
 
-from .formats import is_url
+from .formats import is_audio_file, is_url
+
+BASE_VLC_ARGS = [
+    "--no-video-title-show",
+    "--quiet",
+    "--avcodec-hw=any",
+]
+
+# audio-visual/effect-list son opciones de instancia/reproductor: libvlc las
+# ignora silenciosamente si se pasan como media.add_option() por-input, asi
+# que solo se pueden activar recreando el Instance con ellas en los args.
+VISUALIZER_VLC_ARGS = ["--audio-visual=visual", "--effect-list=spectrum"]
 
 
 class VLCPlayer:
     def __init__(self):
-        vlc_args = [
-            "--no-video-title-show",
-            "--quiet",
-            "--avcodec-hw=any",
-        ]
-        self.instance = vlc.Instance(vlc_args)
-        self.media_player = self.instance.media_player_new()
+        self._volume = 80
+        self._muted = False
+        self._rate = 1.0
         self._equalizer = None
+        self._video_widget = None
+        self._visualizer_on = False
+        self._create_instance(visualizer=False)
+
+    def _create_instance(self, visualizer: bool):
+        args = BASE_VLC_ARGS + (VISUALIZER_VLC_ARGS if visualizer else [])
+        self.instance = vlc.Instance(args)
+        self.media_player = self.instance.media_player_new()
+        self._visualizer_on = visualizer
+
+        self.media_player.audio_set_volume(self._volume)
+        self.media_player.audio_set_mute(self._muted)
+        self.media_player.set_rate(self._rate)
+        if self._equalizer is not None:
+            self.media_player.set_equalizer(self._equalizer)
+        if self._video_widget is not None:
+            self._attach_to_widget(self._video_widget)
 
     # -- salida de video ---------------------------------------------------
-    def attach_video_output(self, widget):
+    def _attach_to_widget(self, widget):
         wid = int(widget.winId())
         if sys.platform.startswith("win"):
             self.media_player.set_hwnd(wid)
@@ -30,12 +55,31 @@ class VLCPlayer:
         elif sys.platform == "darwin":
             self.media_player.set_nsobject(wid)
 
+    def attach_video_output(self, widget):
+        self._video_widget = widget
+        self._attach_to_widget(widget)
+
     # -- carga / transporte --------------------------------------------------
-    def load(self, path_or_url: str):
+    def load(self, path_or_url: str, enable_visualizer: bool = False):
+        # Sin el visualizador, un archivo de solo audio deja el video_frame en
+        # negro. El filtro "visual" de libVLC genera un espectro y lo manda
+        # por la misma salida de video ya embebida, como si fuera un video
+        # normal -- pero solo se puede activar/desactivar recreando el
+        # Instance (ver VISUALIZER_VLC_ARGS).
+        want_visualizer = enable_visualizer and is_audio_file(path_or_url)
+        if want_visualizer != self._visualizer_on:
+            self.media_player.stop()
+            self._create_instance(visualizer=want_visualizer)
+
         if is_url(path_or_url):
             media = self.instance.media_new(path_or_url)
         else:
-            media = self.instance.media_new_path(path_or_url)
+            # libvlc_media_new_path falla silenciosamente en Windows con
+            # rutas que usan "/" (el reproductor se queda en
+            # State.NothingSpecial para siempre, sin pasar nunca a
+            # State.Error): normalizar a "\" antes de pasarlo. Rutas asi
+            # llegan tipicamente por argumentos de linea de comandos.
+            media = self.instance.media_new_path(os.path.normpath(path_or_url))
         self.media_player.set_media(media)
         return media
 
@@ -75,18 +119,21 @@ class VLCPlayer:
         return self.media_player.audio_get_volume()
 
     def set_volume(self, vol: int):
-        self.media_player.audio_set_volume(max(0, min(200, vol)))
+        self._volume = max(0, min(200, vol))
+        self.media_player.audio_set_volume(self._volume)
 
     def is_muted(self) -> bool:
         return bool(self.media_player.audio_get_mute())
 
     def set_muted(self, muted: bool):
+        self._muted = muted
         self.media_player.audio_set_mute(muted)
 
     def get_rate(self) -> float:
         return self.media_player.get_rate()
 
     def set_rate(self, rate: float):
+        self._rate = rate
         self.media_player.set_rate(rate)
 
     def audio_tracks(self):
@@ -114,6 +161,9 @@ class VLCPlayer:
     # -- video -------------------------------------------------------------
     def take_snapshot(self, path: str, width: int = 0, height: int = 0):
         self.media_player.video_take_snapshot(0, path, width, height)
+
+    def has_active_video_output(self) -> bool:
+        return bool(self.media_player.has_vout())
 
     def has_video(self) -> bool:
         if not self.media_player.has_vout():
