@@ -22,11 +22,9 @@ jobs:
 
       # VLC (libvlc) y las librerias minimas de Qt son necesarias para que
       # tests/test_app_smoke.py pueda importar `vlc` y construir una
-      # QApplication con la plataforma "offscreen". xvfb da un display X real
-      # (virtual) para que tests/test_visualizer.py y test_backend.py puedan
-      # dejar que VLC autoseleccione un modulo de video real -- los nombres
-      # de modulo "vdummy"/"adummy" no se resuelven igual en el VLC de los
-      # repos de Ubuntu que en Windows.
+      # QApplication con la plataforma "offscreen". xvfb da un display X
+      # real (virtual) para que la seleccion automatica de video de VLC
+      # tenga algo a donde salir (tests/test_visualizer.py, test_backend.py).
       # vlc-plugin-visualization trae el filtro "visual" (espectro de audio)
       # que usa el visualizador: es una dependencia Recommends de vlc, y
       # muchas imagenes de CI (incluida esta) traen APT::Install-Recommends
@@ -41,9 +39,6 @@ jobs:
 
       - name: Compile check
         run: python -m compileall -q player run.py
-
-      - name: DEBUG visualizer probe
-        run: xvfb-run --auto-servernum python scripts_debug_probe.py 2>&1 | grep -v "ALSA lib\|snd_" | tail -100
 
       - name: Run tests
         run: xvfb-run --auto-servernum python -m pytest -q

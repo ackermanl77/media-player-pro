@@ -31,13 +31,14 @@ def _make_test_wav(path: str, duration: float = 2.0, freq: float = 440.0, rate: 
 
 def _headless_player() -> VLCPlayer:
     player = VLCPlayer()
-    # No se fuerza --vout/--aout: los nombres de modulo "vdummy"/"adummy" no
-    # se resuelven igual en todas las builds de VLC (funcionan en el VLC de
-    # Windows, pero no en el de los repos de Ubuntu usado en CI). Dejar que
-    # VLC autoseleccione es mas portable; en CI corre bajo xvfb (display X
-    # virtual) para que la seleccion automatica de video tenga algo real a
-    # donde salir.
-    player.instance = vlc.Instance(["--quiet"])
+    # --aout=adummy: en un runner de CI sin tarjeta de sonido real, VLC
+    # intenta abrir el dispositivo ALSA "default", falla, y el decoder de
+    # audio muere sin darle nunca la oportunidad de correr al filtro
+    # "visual" (que cuelga de esa misma cadena de audio) -- el video_frame
+    # se queda en negro aunque el filtro funcione perfectamente bien. No se
+    # fuerza --vout: la seleccion automatica de video ya tiene un display X
+    # real a donde salir gracias a xvfb en CI.
+    player.instance = vlc.Instance(["--aout=adummy", "--quiet"])
     player.media_player = player.instance.media_player_new()
     return player
 
