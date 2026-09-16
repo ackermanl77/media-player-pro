@@ -38,7 +38,10 @@ def test_load_plays_a_path_that_uses_forward_slashes(tmp_path):
         f.writeframes(b"\x00\x00" * 8000)  # 1 segundo de silencio
 
     player = VLCPlayer()
-    player.instance = vlc.Instance(["--vout=vdummy", "--aout=adummy", "--quiet"])
+    # No se fuerza --vout/--aout: "vdummy"/"adummy" no se resuelven igual en
+    # todas las builds de VLC (ver test_visualizer.py). Esta prueba no
+    # depende de video en absoluto, asi que la autoseleccion de VLC basta.
+    player.instance = vlc.Instance(["--quiet"])
     player.media_player = player.instance.media_player_new()
 
     player.load(wav_path)

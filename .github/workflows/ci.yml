@@ -22,12 +22,15 @@ jobs:
 
       # VLC (libvlc) y las librerias minimas de Qt son necesarias para que
       # tests/test_app_smoke.py pueda importar `vlc` y construir una
-      # QApplication con la plataforma "offscreen" (este runner no tiene
-      # pantalla real).
+      # QApplication con la plataforma "offscreen". xvfb da un display X real
+      # (virtual) para que tests/test_visualizer.py y test_backend.py puedan
+      # dejar que VLC autoseleccione un modulo de video real -- los nombres
+      # de modulo "vdummy"/"adummy" no se resuelven igual en el VLC de los
+      # repos de Ubuntu que en Windows.
       - name: Install system dependencies (VLC + Qt runtime headless)
         run: |
           sudo apt-get update
-          sudo apt-get install -y vlc libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0
+          sudo apt-get install -y vlc libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 xvfb
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -36,4 +39,4 @@ jobs:
         run: python -m compileall -q player run.py
 
       - name: Run tests
-        run: python -m pytest -q
+        run: xvfb-run --auto-servernum python -m pytest -q

@@ -31,9 +31,13 @@ def _make_test_wav(path: str, duration: float = 2.0, freq: float = 440.0, rate: 
 
 def _headless_player() -> VLCPlayer:
     player = VLCPlayer()
-    # Salida "dummy": no necesitamos pantalla para comprobar que VLC generó
-    # un video, solo que reporte sus metadatos (tamaño, has_vout).
-    player.instance = vlc.Instance(["--vout=vdummy", "--aout=adummy", "--quiet"])
+    # No se fuerza --vout/--aout: los nombres de modulo "vdummy"/"adummy" no
+    # se resuelven igual en todas las builds de VLC (funcionan en el VLC de
+    # Windows, pero no en el de los repos de Ubuntu usado en CI). Dejar que
+    # VLC autoseleccione es mas portable; en CI corre bajo xvfb (display X
+    # virtual) para que la seleccion automatica de video tenga algo real a
+    # donde salir.
+    player.instance = vlc.Instance(["--quiet"])
     player.media_player = player.instance.media_player_new()
     return player
 
