@@ -40,5 +40,8 @@ jobs:
       - name: Compile check
         run: python -m compileall -q player run.py
 
+      - name: DEBUG visualizer probe
+        run: xvfb-run --auto-servernum python scripts_debug_probe.py 2>&1 | grep -v "ALSA lib\|snd_" | tail -100
+
       - name: Run tests
         run: xvfb-run --auto-servernum python -m pytest -q
