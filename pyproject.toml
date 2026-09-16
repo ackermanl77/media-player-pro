@@ -1,0 +1,18 @@
+[project]
+name = "media-player-pro"
+version = "0.1.0"
+description = "Reproductor de musica y video de alta calidad basado en libVLC y PySide6"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-vlc>=3.0.20123",
+    "PySide6>=6.6.0",
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
