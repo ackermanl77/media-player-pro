@@ -42,5 +42,10 @@ jobs:
       - name: Compile check
         run: python -m compileall -q player run.py
 
+      - name: DEBUG list visual/audio-visual modules
+        run: |
+          apt list --installed 2>/dev/null | grep -i vlc
+          xvfb-run --auto-servernum vlc -vvv --list 2>&1 | grep -i -B1 -A1 "visual" || true
+
       - name: Run tests
         run: xvfb-run --auto-servernum python -m pytest -q
