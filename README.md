@@ -82,6 +82,14 @@ pip install -r requirements-build.txt
 pyinstaller ReproductorMultimediaPro.spec
 ```
 
+## Documentación
+
+Para arquitectura, entry points, estado de la release, problemas
+conocidos e historial detallado de bugs encontrados y arreglados, ver
+[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). Guías por función (cómo
+usar cada cosa y cómo se verificó) en
+[docs/workflows/](docs/workflows/README.md).
+
 ## Notas
 
 - Si al iniciar aparece un error indicando que no se encuentra `libvlc`,
