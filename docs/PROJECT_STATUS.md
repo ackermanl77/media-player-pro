@@ -54,8 +54,11 @@ tener VLC instalado.
 dist/ReproductorMultimediaPro.exe
 ```
 
-Se genera con `pyinstaller ReproductorMultimediaPro.spec` (ver
-[docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md)).
+Se genera con `pyinstaller ReproductorMultimediaPro.spec`, manualmente o
+automáticamente en cada push a `main`/`master` vía
+`.github/workflows/build-exe.yml` (queda como artifact descargable en la
+ejecución correspondiente de GitHub Actions). Ver
+[docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md).
 No empaqueta VLC: la máquina que ejecute el `.exe` necesita tener VLC media
 player instalado aparte, igual que al correr desde el código fuente.
 

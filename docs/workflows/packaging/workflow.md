@@ -5,7 +5,18 @@
 Generar un `.exe` de Windows de un solo archivo que no necesite tener
 Python instalado, para poder distribuirlo o abrirlo con doble clic.
 
-## Build
+## Build automático (CI)
+
+`.github/workflows/build-exe.yml` reconstruye el `.exe` automáticamente en
+un runner de `windows-latest` cada vez que hay un push a `main`/`master`
+(o manualmente desde la pestaña Actions → "Build Windows EXE" → "Run
+workflow"). El resultado queda como *artifact* de esa ejecución —
+GitHub → Actions → la ejecución más reciente → "Artifacts" →
+`ReproductorMultimediaPro-windows` — descargable como `.zip` durante 30
+días. No hace falta tener Python ni VLC instalados localmente para obtener
+un `.exe` actualizado; solo hacer push.
+
+## Build manual
 
 ```bash
 pip install -r requirements-build.txt
