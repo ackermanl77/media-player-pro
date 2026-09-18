@@ -46,6 +46,10 @@ tener VLC instalado.
 | Ventana principal y todo el cableado de la UI | `player/main_window.py::MainWindow` |
 | Envoltorio sobre libVLC (transporte, volumen, pistas, ecualizador, visualizador) | `player/backend.py::VLCPlayer` |
 | Formatos soportados y helpers puros (tiempo, rutas, filtros de diálogo) | `player/formats.py` |
+| Posiciones de reproducción recordadas entre sesiones | `player/resume.py` |
+| Configuración persistente del usuario (API keys) | `player/config.py` |
+| Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
+| Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
 | Receta de PyInstaller para el ejecutable de Windows | `ReproductorMultimediaPro.spec` |
 
 ## Release
@@ -123,17 +127,50 @@ player instalado aparte, igual que al correr desde el código fuente.
   `update_ui()` → fin de playlist, no solo desde una llamada directa al
   método. Ver [docs/workflows/playlist/workflow.md](workflows/playlist/workflow.md).
 
+- **Sexta función inspirada en BS.Player: búsqueda y descarga de
+  subtítulos online, vía la API de OpenSubtitles.** De las dos funciones
+  de mayor alcance identificadas (esta y "marcadores nombrados múltiples
+  por archivo"), el usuario eligió esta primero y proporcionó su propia
+  API key de opensubtitles.com (guardada localmente vía `player/config.py`
+  en `~/.reproductor_multimedia_pro/config.json` — **nunca en el
+  repositorio**). Piezas nuevas:
+  - `player/opensubtitles.py`: cliente minimo de la API REST
+    (`api.opensubtitles.com/v1`), sin dependencia de VLC/Qt. Incluye el
+    algoritmo de hash de OpenSubtitles (el mismo que usa BS.Player y
+    muchos otros reproductores: tamaño + suma de bloques de 8 bytes de
+    los primeros/últimos 64KB, solo aplica a archivos ≥128KB) para
+    búsqueda exacta, con fallback a búsqueda por texto (nombre del
+    archivo limpio) cuando el hash no encuentra nada.
+  - `player/subtitle_dialog.py::OnlineSubtitleDialog`: la UI — busca y
+    descarga en `QThread`s separados para no congelar la interfaz durante
+    las llamadas de red.
+  - Nueva dependencia: `requests` (agregada a `requirements.txt` y
+    `pyproject.toml`).
+
+  `tests/test_opensubtitles.py` (9 tests) prueba el algoritmo de hash con
+  vectores construidos a mano y el cliente HTTP con `requests.get`/`.post`
+  reemplazados — la suite automatizada **nunca golpea la API real**.
+  Verificado además en vivo, dos veces: primero el cliente en aislado
+  (búsqueda por texto "The Matrix 1999" devolvió 50 resultados reales,
+  descargar el primero produjo un `.srt` válido), y después el diálogo
+  real completo end-to-end (`OnlineSubtitleDialog` contra un archivo de
+  video real, hilo de búsqueda → selección → hilo de descarga → el
+  archivo descargado llega hasta `VLCPlayer.load_subtitle_file()`). Ver
+  [docs/workflows/online-subtitles/workflow.md](workflows/online-subtitles/workflow.md).
+
 ## Verification
 
 ```bash
 python -m pytest -q
 ```
 
-`tests/test_formats.py` no depende de VLC ni de Qt. El resto de la suite
-(`test_backend.py`, `test_visualizer.py`, `test_app_smoke.py`) importa
-`vlc` de verdad y se **omite automáticamente** (no falla) si no hay VLC
-instalado en la máquina — son pruebas de humo reales contra libVLC, no
-mocks. Corre `pytest` tú mismo antes de confiar en un número de tests
+`tests/test_formats.py`, `test_resume.py` y `test_opensubtitles.py` no
+dependen de VLC ni de Qt (este último tampoco toca la red real: mockea
+`requests`). El resto de la suite (`test_backend.py`, `test_visualizer.py`,
+`test_app_smoke.py`, `test_on_finish_action.py`) importa `vlc` de verdad y
+se **omite automáticamente** (no falla) si no hay VLC instalado en la
+máquina — son pruebas de humo reales contra libVLC, no mocks. Corre
+`pytest` tú mismo antes de confiar en un número de tests
 pasados; no hay una cifra fija documentada aquí porque la suite sigue
 creciendo.
 

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from .backend import VLCPlayer
 from .formats import ALL_EXTS, build_open_filter, format_time, is_url
 from .resume import clear_position, get_saved_position_ms, save_position
+from .subtitle_dialog import OnlineSubtitleDialog
 
 
 class VideoFrame(QFrame):
@@ -418,6 +419,10 @@ class MainWindow(QMainWindow):
         act_load_sub = QAction("Cargar subtítulo externo...", self)
         act_load_sub.triggered.connect(self.load_subtitle_file)
         menu_video.addAction(act_load_sub)
+
+        act_search_sub_online = QAction("Buscar subtítulos online...", self)
+        act_search_sub_online.triggered.connect(self.search_subtitles_online)
+        menu_video.addAction(act_search_sub_online)
 
         act_sub_delay_earlier = QAction("Adelantar subtítulos 50 ms", self, shortcut="G")
         act_sub_delay_earlier.triggered.connect(lambda: self._adjust_subtitle_delay(-50))
@@ -810,6 +815,17 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.player.load_subtitle_file(path)
+
+    def search_subtitles_online(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            QMessageBox.information(
+                self, "Buscar subtítulos online", "Esta función solo funciona con archivos locales."
+            )
+            return
+        dialog = OnlineSubtitleDialog(path, self)
+        dialog.subtitle_ready.connect(self.player.load_subtitle_file)
+        dialog.exec()
 
     def _adjust_subtitle_delay(self, delta_ms: int):
         self._set_subtitle_delay(self.player.get_subtitle_delay_ms() + delta_ms)

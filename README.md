@@ -18,6 +18,13 @@ hardware cuando el sistema la soporta.
 pip install -r requirements.txt
 ```
 
+4. **Opcional** — para buscar/descargar subtítulos online: una API key
+   gratuita de [opensubtitles.com](https://www.opensubtitles.com/en/consumers)
+   (creas tu propia cuenta, no es necesaria para el resto de la app). La
+   primera vez que uses "Buscar subtítulos online..." te la pedirá y la
+   guarda en `~/.reproductor_multimedia_pro/config.json` (nunca en el
+   repositorio ni en ningún archivo del proyecto).
+
 ## Ejecutar
 
 ```bash
@@ -59,6 +66,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   programa, o en Windows también Apagar el equipo / Hibernar / Reiniciar
   — como el `-sdown` de BS.Player. Apagar/Reiniciar dan 60s antes de
   ejecutarse (cancelable con `shutdown /a`); Hibernar es inmediato.
+- **Búsqueda y descarga de subtítulos online** (menú Video → "Buscar
+  subtítulos online..."), vía la API de OpenSubtitles — requiere tu
+  propia API key gratuita, ver [Requisitos](#requisitos) más abajo.
 
 ## Atajos de teclado
 

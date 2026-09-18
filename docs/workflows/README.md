@@ -16,6 +16,7 @@ estado de la release y problemas conocidos, la fuente de verdad es
 
 - [Visualizador de audio](visualizer/workflow.md)
 - [Pistas de audio y subtítulos](audio-tracks-subtitles/workflow.md)
+- [Búsqueda y descarga de subtítulos online](online-subtitles/workflow.md)
 - [Ecualizador](equalizer/workflow.md)
 
 ## Distribución y Calidad
