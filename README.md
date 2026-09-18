@@ -55,6 +55,10 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande).
 - **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo
   **"Siempre visible"** (encima de otras ventanas).
+- **Acción al terminar la lista** (menú Reproducción): Nada, Salir del
+  programa, o en Windows también Apagar el equipo / Hibernar / Reiniciar
+  — como el `-sdown` de BS.Player. Apagar/Reiniciar dan 60s antes de
+  ejecutarse (cancelable con `shutdown /a`); Hibernar es inmediato.
 
 ## Atajos de teclado
 

@@ -1,5 +1,7 @@
 import os
 import random
+import subprocess
+import sys
 
 import vlc
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -146,6 +148,7 @@ class MainWindow(QMainWindow):
         self.equalizer_dialog = None
         self.loop_point_a = None
         self.loop_point_b = None
+        self.on_finish_action = "none"
 
         self.setAcceptDrops(True)
 
@@ -363,6 +366,24 @@ class MainWindow(QMainWindow):
         act_prev = QAction("Anterior", self, shortcut="Ctrl+Left")
         act_prev.triggered.connect(self.play_previous)
         menu_playback.addAction(act_prev)
+
+        self.menu_on_finish = menu_playback.addMenu("Al terminar la lista")
+        on_finish_group = QActionGroup(self.menu_on_finish)
+        on_finish_group.setExclusive(True)
+        on_finish_options = [("Nada", "none"), ("Salir del programa", "exit")]
+        if sys.platform.startswith("win"):
+            # Apagar/Hibernar/Reiniciar usan shutdown.exe, especifico de Windows.
+            on_finish_options += [
+                ("Apagar el equipo", "shutdown"),
+                ("Hibernar", "hibernate"),
+                ("Reiniciar", "restart"),
+            ]
+        for label, key in on_finish_options:
+            action = QAction(label, self.menu_on_finish, checkable=True)
+            action.setChecked(key == "none")
+            action.triggered.connect(lambda _checked, k=key: setattr(self, "on_finish_action", k))
+            on_finish_group.addAction(action)
+            self.menu_on_finish.addAction(action)
 
         # -- Audio --
         menu_audio = menubar.addMenu("&Audio")
@@ -627,10 +648,31 @@ class MainWindow(QMainWindow):
                     next_index = 0
                 elif auto:
                     self.player.stop()
+                    self._handle_playlist_finished()
                     return
                 else:
                     return
         self.play_index(next_index)
+
+    def _handle_playlist_finished(self):
+        action = self.on_finish_action
+        if action == "none":
+            return
+        if action == "exit":
+            self.close()
+            return
+        if action == "shutdown":
+            subprocess.run(["shutdown", "/s", "/t", "60"], check=False)
+            self.statusBar().showMessage(
+                "Lista terminada: el equipo se apagará en 60s (\"shutdown /a\" en una consola para cancelar)", 0
+            )
+        elif action == "hibernate":
+            subprocess.run(["shutdown", "/h"], check=False)
+        elif action == "restart":
+            subprocess.run(["shutdown", "/r", "/t", "60"], check=False)
+            self.statusBar().showMessage(
+                "Lista terminada: el equipo se reiniciará en 60s (\"shutdown /a\" en una consola para cancelar)", 0
+            )
 
     def play_previous(self):
         if self.current_index == -1:

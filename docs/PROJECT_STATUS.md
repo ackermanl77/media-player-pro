@@ -103,6 +103,26 @@ player instalado aparte, igual que al correr desde el código fuente.
   segundo 6. `tests/test_resume.py` (8 tests) cubre `player/resume.py`
   sin necesitar VLC ni Qt.
 
+- **Quinta función inspirada en BS.Player: "acción al terminar la
+  lista".** Al revisar `C:\Program Files (x86)\Webteh\BSPlayer` (instalado
+  por el usuario) se encontró en `doc/cmdline.txt` el flag real `-sdown`
+  ("Shutdown when movie is finished") y `changes.txt` confirmando que las
+  funciones ya implementadas coinciden con BS.Player real. Se agregó un
+  submenú Reproducción → "Al terminar la lista": Nada (por defecto), Salir
+  del programa, y en Windows también Apagar el equipo / Hibernar /
+  Reiniciar. Se dispara solo cuando la playlist termina de verdad (no en
+  modo "Repetir: Todo"). Apagar/Reiniciar usan `shutdown /s|/r /t 60` (60s
+  de margen, cancelable con `shutdown /a`); Hibernar (`shutdown /h`) es
+  inmediato al no admitir retraso. Como con cualquier acción que apaga o
+  reinicia la máquina, **nunca se ejecuta un `shutdown` real durante las
+  pruebas**: `tests/test_on_finish_action.py` (5 tests) parchea
+  `subprocess.run` para verificar el comando exacto que se arma en cada
+  caso. Verificado además en vivo end-to-end con una playlist real de una
+  sola pista de 5s y `on_finish_action="exit"`: la app se cierra sola
+  justo cuando el video termina, confirmando que el disparo llega desde
+  `update_ui()` → fin de playlist, no solo desde una llamada directa al
+  método. Ver [docs/workflows/playlist/workflow.md](workflows/playlist/workflow.md).
+
 ## Verification
 
 ```bash
