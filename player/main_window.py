@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from .backend import VLCPlayer
 from .formats import ALL_EXTS, build_open_filter, format_time, is_url
+from .resume import clear_position, get_saved_position_ms, save_position
 
 
 class VideoFrame(QFrame):
@@ -143,6 +144,8 @@ class MainWindow(QMainWindow):
         self._advancing = False
         self._dock_was_visible = True
         self.equalizer_dialog = None
+        self.loop_point_a = None
+        self.loop_point_b = None
 
         self.setAcceptDrops(True)
 
@@ -281,6 +284,14 @@ class MainWindow(QMainWindow):
         self.btn_repeat.clicked.connect(self._cycle_repeat_mode)
         buttons_row.addWidget(self.btn_repeat)
 
+        self.btn_ab_loop = QPushButton("A-B")
+        self.btn_ab_loop.setToolTip(
+            "Marca un punto A, luego un punto B: repite en bucle solo ese tramo. "
+            "Un tercer clic lo desactiva."
+        )
+        self.btn_ab_loop.clicked.connect(self._on_ab_loop_clicked)
+        buttons_row.addWidget(self.btn_ab_loop)
+
         self.btn_fullscreen = QPushButton()
         self.btn_fullscreen.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
@@ -295,7 +306,8 @@ class MainWindow(QMainWindow):
         for w in (
             self.btn_prev, self.btn_play, self.btn_stop, self.btn_next,
             self.btn_mute, self.position_slider, self.volume_slider,
-            self.speed_combo, self.btn_shuffle, self.btn_repeat, self.btn_fullscreen,
+            self.speed_combo, self.btn_shuffle, self.btn_repeat, self.btn_ab_loop,
+            self.btn_fullscreen,
         ):
             w.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -385,6 +397,44 @@ class MainWindow(QMainWindow):
         act_load_sub = QAction("Cargar subtítulo externo...", self)
         act_load_sub.triggered.connect(self.load_subtitle_file)
         menu_video.addAction(act_load_sub)
+
+        act_sub_delay_earlier = QAction("Adelantar subtítulos 50 ms", self, shortcut="G")
+        act_sub_delay_earlier.triggered.connect(lambda: self._adjust_subtitle_delay(-50))
+        menu_video.addAction(act_sub_delay_earlier)
+
+        act_sub_delay_later = QAction("Retrasar subtítulos 50 ms", self, shortcut="H")
+        act_sub_delay_later.triggered.connect(lambda: self._adjust_subtitle_delay(50))
+        menu_video.addAction(act_sub_delay_later)
+
+        act_sub_delay_reset = QAction("Restablecer sincronía de subtítulos", self)
+        act_sub_delay_reset.triggered.connect(lambda: self._set_subtitle_delay(0))
+        menu_video.addAction(act_sub_delay_reset)
+
+        self.menu_sub_size = menu_video.addMenu("Tamaño de subtítulos")
+        sub_size_group = QActionGroup(self.menu_sub_size)
+        sub_size_group.setExclusive(True)
+        for label, scale in (("Pequeño", 75), ("Normal", 100), ("Grande", 150), ("Muy grande", 200)):
+            action = QAction(label, self.menu_sub_size, checkable=True)
+            action.setChecked(scale == 100)
+            action.triggered.connect(lambda _checked, s=scale: self._on_subtitle_scale_changed(s))
+            sub_size_group.addAction(action)
+            self.menu_sub_size.addAction(action)
+
+        self.menu_zoom = menu_video.addMenu("Zoom")
+        zoom_group = QActionGroup(self.menu_zoom)
+        zoom_group.setExclusive(True)
+        for label, factor in (
+            ("Ajustar a ventana", 0.0), ("50%", 0.5), ("100%", 1.0), ("150%", 1.5), ("200%", 2.0),
+        ):
+            action = QAction(label, self.menu_zoom, checkable=True)
+            action.setChecked(factor == 0.0)
+            action.triggered.connect(lambda _checked, f=factor: self.player.set_video_scale(f))
+            zoom_group.addAction(action)
+            self.menu_zoom.addAction(action)
+
+        self.act_always_on_top = QAction("Siempre visible (encima de otras ventanas)", self, checkable=True)
+        self.act_always_on_top.toggled.connect(self._on_always_on_top_toggled)
+        menu_video.addAction(self.act_always_on_top)
 
         # -- Ver --
         menu_view = menubar.addMenu("&Ver")
@@ -512,16 +562,39 @@ class MainWindow(QMainWindow):
         item = self.playlist_widget.item(index)
         if item is None:
             return
+        self._save_current_position()
         path = item.data(Qt.ItemDataRole.UserRole)
         self.current_index = index
         self.playlist_widget.setCurrentRow(index)
         self._advancing = False
+        self.loop_point_a = None
+        self.loop_point_b = None
+        self.btn_ab_loop.setText("A-B")
         self.player.load(path, enable_visualizer=self.act_visualizer.isChecked())
         self.player.attach_video_output(self.video_frame)
         self.player.play()
         self.player.set_rate(self.speed_combo.currentData())
         self.setWindowTitle(f"Reproductor Multimedia Pro — {self._display_name(path)}")
         self.statusBar().showMessage(f"Reproduciendo: {self._display_name(path)}")
+        self._maybe_resume_position(path)
+
+    def _save_current_position(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            return
+        save_position(path, self.player.get_time_ms(), self.player.get_length_ms())
+
+    def _current_path_or_none(self):
+        item = self.playlist_widget.item(self.current_index) if self.current_index != -1 else None
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+    def _maybe_resume_position(self, path: str):
+        if is_url(path):
+            return
+        saved_ms = get_saved_position_ms(path)
+        if saved_ms:
+            self.player.set_time_ms(saved_ms)
+            self.statusBar().showMessage(f"Reanudado desde {format_time(saved_ms)}", 4000)
 
     def toggle_play_pause(self):
         if self.current_index == -1:
@@ -584,6 +657,24 @@ class MainWindow(QMainWindow):
         self.repeat_mode = order[(idx + 1) % len(order)]
         self.btn_repeat.setText(f"Repetir: {labels[self.repeat_mode]}")
 
+    def _on_ab_loop_clicked(self):
+        if self.current_index == -1:
+            return
+        if self.loop_point_a is None:
+            self.loop_point_a = self.player.get_time_ms()
+            self.btn_ab_loop.setText(f"A: {format_time(self.loop_point_a)}")
+        elif self.loop_point_b is None:
+            candidate_b = self.player.get_time_ms()
+            if candidate_b <= self.loop_point_a:
+                self.statusBar().showMessage("El punto B debe ser posterior al punto A", 3000)
+                return
+            self.loop_point_b = candidate_b
+            self.btn_ab_loop.setText(f"A-B: {format_time(self.loop_point_a)}-{format_time(self.loop_point_b)}")
+        else:
+            self.loop_point_a = None
+            self.loop_point_b = None
+            self.btn_ab_loop.setText("A-B")
+
     # ------------------------------------------------------------ sliders
     def _on_slider_pressed(self):
         self.dragging_slider = True
@@ -623,6 +714,9 @@ class MainWindow(QMainWindow):
 
         self.btn_play.setIcon(self.icon_pause if self.player.is_playing() else self.icon_play)
 
+        if self.loop_point_b is not None and self.player.get_time_ms() >= self.loop_point_b:
+            self.player.set_time_ms(self.loop_point_a)
+
         state = self.player.get_state()
         if state == vlc.State.Error and not self._advancing and self.current_index != -1:
             failed_item = self.playlist_widget.item(self.current_index)
@@ -632,6 +726,11 @@ class MainWindow(QMainWindow):
             self.play_next(auto=True)
             self._advancing = False
         elif state == vlc.State.Ended and not self._advancing and self.current_index != -1:
+            # Se vio/escuchó completo: la próxima vez que se abra, empieza de
+            # nuevo en vez de "reanudar" a un segundo del final.
+            finished_path = self._current_path_or_none()
+            if finished_path is not None and not is_url(finished_path):
+                clear_position(finished_path)
             self._advancing = True
             self.play_next(auto=True)
             self._advancing = False
@@ -670,6 +769,30 @@ class MainWindow(QMainWindow):
         if path:
             self.player.load_subtitle_file(path)
 
+    def _adjust_subtitle_delay(self, delta_ms: int):
+        self._set_subtitle_delay(self.player.get_subtitle_delay_ms() + delta_ms)
+
+    def _set_subtitle_delay(self, delay_ms: int):
+        self.player.set_subtitle_delay_ms(delay_ms)
+        sign = "+" if delay_ms >= 0 else ""
+        self.statusBar().showMessage(f"Sincronía de subtítulos: {sign}{delay_ms} ms", 3000)
+
+    def _on_subtitle_scale_changed(self, scale: int):
+        self.player.set_subtitle_scale(scale)
+        if self.current_index == -1:
+            return
+        # --sub-text-scale es de instancia: para verlo aplicado ya mismo hay
+        # que recrear el Instance (VLCPlayer.load() lo hace solo), lo que
+        # implica recargar el archivo actual. Se preserva posición y estado
+        # de pausa para que el cambio se sienta transparente.
+        was_playing = self.player.is_playing()
+        position = self.player.get_position()
+        self.play_index(self.current_index)
+        if position > 0:
+            self.player.set_position(position)
+        if not was_playing:
+            self.player.set_paused(True)
+
     def take_snapshot(self):
         if self.current_index == -1:
             return
@@ -703,6 +826,10 @@ class MainWindow(QMainWindow):
         self.playlist_dock.setVisible(self._dock_was_visible)
         self.menuBar().setVisible(True)
         self.controls_bar.setVisible(True)
+
+    def _on_always_on_top_toggled(self, checked: bool):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+        self.show()
 
     # ------------------------------------------------------------ drag & drop
     def dragEnterEvent(self, event):
@@ -742,5 +869,6 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        self._save_current_position()
         self.player.stop()
         super().closeEvent(event)

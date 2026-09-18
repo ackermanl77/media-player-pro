@@ -62,6 +62,47 @@ ejecución correspondiente de GitHub Actions). Ver
 No empaqueta VLC: la máquina que ejecute el `.exe` necesita tener VLC media
 player instalado aparte, igual que al correr desde el código fuente.
 
+## Recently Added
+
+- **Cuatro funciones inspiradas en BS.Player**: recordar posición de
+  reproducción entre sesiones, repetición A-B (loop de un tramo), sincronía
+  y tamaño de subtítulos ajustables, y zoom de video + modo "siempre
+  visible". El pedido original fue "revisa este instalador de BS.Player
+  (`bsplayer279.setup.exe`) y agrega sus funciones acá" — **no se ejecutó
+  el instalador** (aunque su firma digital resultó válida, de "AB Team
+  d.o.o.", consistente con BS.Player real): correr un instalador de
+  terceros sin poder supervisar interactivamente sus diálogos nativos de
+  Windows no es algo para automatizar. En su lugar, se identificaron las
+  funciones de BS.Player equivalentes y se implementaron directamente
+  contra libVLC:
+  - **Recordar posición** (`player/resume.py`, módulo puro sin VLC/Qt):
+    guarda la posición de cada archivo local en
+    `~/.reproductor_multimedia_pro/positions.json` al cambiar de pista o
+    cerrar la app, y la restaura al reabrir el mismo archivo — con
+    umbrales para no "reanudar" casi desde el inicio ni casi desde el
+    final. Ver [docs/workflows/resume-playback/workflow.md](workflows/resume-playback/workflow.md).
+  - **Repetición A-B**: un botón que cicla Marcar A → Marcar B (bucle
+    activo) → Limpiar, comprobado en el mismo timer de 250 ms que ya
+    actualizaba la barra de progreso. Ver
+    [docs/workflows/ab-loop/workflow.md](workflows/ab-loop/workflow.md).
+  - **Sincronía de subtítulos** (`video_set_spu_delay`, atajos `G`/`H`,
+    ±50 ms, efecto inmediato) y **tamaño de subtítulos** (`--sub-text-scale`
+    — de nuevo una opción de *instancia*, no de `Media`, así que cambiarla
+    recarga el archivo actual internamente preservando posición y estado
+    de pausa, igual que el visualizador de audio). Ver
+    [docs/workflows/audio-tracks-subtitles/workflow.md](workflows/audio-tracks-subtitles/workflow.md).
+  - **Zoom de video** (`video_set_scale`, en vivo, sin recrear nada) y
+    **"Siempre visible"** (`Qt.WindowType.WindowStaysOnTopHint`).
+
+  Las cuatro se verificaron en vivo contra un video sintético real (12s,
+  generado con OpenCV): zoom, siempre-visible y delay de subtítulos sin
+  excepciones; A-B efectivamente vuelve al punto A al cruzar B; el cambio
+  de tamaño de subtítulos recarga y sigue en `State.Playing` sin
+  colgarse; y recordar posición confirmado guardando en el segundo 7 de
+  un video de 12s y comprobando que reabrirlo reanuda después del
+  segundo 6. `tests/test_resume.py` (8 tests) cubre `player/resume.py`
+  sin necesitar VLC ni Qt.
+
 ## Verification
 
 ```bash

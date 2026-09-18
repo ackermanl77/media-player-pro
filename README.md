@@ -46,6 +46,15 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - Ecualizador gráfico de 10 bandas con presets de VLC (Clásica, Rock, Pop, ...).
 - Captura de fotograma de video a PNG.
 - Pantalla completa (doble clic sobre el video o tecla `F`).
+- **Recuerda la posición de reproducción** de cada archivo local entre
+  sesiones (al estilo BS.Player): reabrir un video/audio ya visto retoma
+  donde quedó.
+- **Repetición A-B**: marca un punto A y un punto B para poner en bucle
+  solo ese tramo.
+- **Sincronía de subtítulos** ajustable en vivo (±50 ms, tecla `G`/`H`) y
+  **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande).
+- **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo
+  **"Siempre visible"** (encima de otras ventanas).
 
 ## Atajos de teclado
 
@@ -61,6 +70,8 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 | Flecha der./izq. | Adelantar/retroceder 5 s   |
 | Flecha arr./abajo| Subir/bajar volumen        |
 | M                | Silenciar                  |
+| G                | Adelantar subtítulos 50 ms |
+| H                | Retrasar subtítulos 50 ms  |
 
 ## Desarrollo
 

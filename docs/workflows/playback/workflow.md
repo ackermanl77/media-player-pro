@@ -32,11 +32,18 @@ carpetas sobre la ventana también funciona.
 | Pantalla completa | Doble clic sobre el video, botón, o tecla `F` |
 | Salir de pantalla completa | `Esc` |
 | Captura de fotograma | Menú Video → Capturar fotograma... |
+| Zoom de video | Menú Video → Zoom (Ajustar a ventana/50%/100%/150%/200%) |
+| Siempre visible (encima de otras ventanas) | Menú Video → "Siempre visible..." (checkbox) |
+| Repetición A-B (bucle de un tramo) | Botón "A-B" — ver [docs/workflows/ab-loop/workflow.md](../ab-loop/workflow.md) |
 
 Ninguno de los controles de la barra roba el foco de teclado
 (`Qt.FocusPolicy.NoFocus`), así que los atajos de arriba funcionan sin
 importar en qué botón se haya hecho clic antes — ver la entrada
 correspondiente en `docs/PROJECT_STATUS.md` → "Recently Fixed".
+
+Al reabrir un archivo local ya visto, la reproducción retoma
+automáticamente donde había quedado — ver
+[docs/workflows/resume-playback/workflow.md](../resume-playback/workflow.md).
 
 ## Manejo de errores
 

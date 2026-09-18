@@ -9,6 +9,8 @@ estado de la release y problemas conocidos, la fuente de verdad es
 
 - [Reproducción de audio y video](playback/workflow.md)
 - [Lista de reproducción](playlist/workflow.md)
+- [Recordar posición de reproducción](resume-playback/workflow.md)
+- [Repetición A-B](ab-loop/workflow.md)
 
 ## Audio
 

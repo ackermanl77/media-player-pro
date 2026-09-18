@@ -20,6 +20,8 @@ BASE_VLC_ARGS = [
 # que solo se pueden activar recreando el Instance con ellas en los args.
 VISUALIZER_VLC_ARGS = ["--audio-visual=visual", "--effect-list=spectrum"]
 
+DEFAULT_SUBTITLE_SCALE = 100  # porcentaje; --sub-text-scale es tambien de instancia
+
 
 class VLCPlayer:
     def __init__(self):
@@ -29,13 +31,17 @@ class VLCPlayer:
         self._equalizer = None
         self._video_widget = None
         self._visualizer_on = False
+        self._subtitle_scale = DEFAULT_SUBTITLE_SCALE
+        self._instance_subtitle_scale = DEFAULT_SUBTITLE_SCALE
         self._create_instance(visualizer=False)
 
     def _create_instance(self, visualizer: bool):
         args = BASE_VLC_ARGS + (VISUALIZER_VLC_ARGS if visualizer else [])
+        args = args + [f"--sub-text-scale={self._subtitle_scale}"]
         self.instance = vlc.Instance(args)
         self.media_player = self.instance.media_player_new()
         self._visualizer_on = visualizer
+        self._instance_subtitle_scale = self._subtitle_scale
 
         self.media_player.audio_set_volume(self._volume)
         self.media_player.audio_set_mute(self._muted)
@@ -67,7 +73,7 @@ class VLCPlayer:
         # normal -- pero solo se puede activar/desactivar recreando el
         # Instance (ver VISUALIZER_VLC_ARGS).
         want_visualizer = enable_visualizer and is_audio_file(path_or_url)
-        if want_visualizer != self._visualizer_on:
+        if want_visualizer != self._visualizer_on or self._subtitle_scale != self._instance_subtitle_scale:
             self.media_player.stop()
             self._create_instance(visualizer=want_visualizer)
 
@@ -88,6 +94,9 @@ class VLCPlayer:
 
     def toggle_pause(self):
         self.media_player.pause()
+
+    def set_paused(self, paused: bool):
+        self.media_player.set_pause(1 if paused else 0)
 
     def stop(self):
         self.media_player.stop()
@@ -158,7 +167,23 @@ class VLCPlayer:
     def load_subtitle_file(self, path: str):
         self.media_player.video_set_subtitle_file(path)
 
+    def get_subtitle_delay_ms(self) -> int:
+        return self.media_player.video_get_spu_delay() // 1000
+
+    def set_subtitle_delay_ms(self, delay_ms: int):
+        self.media_player.video_set_spu_delay(delay_ms * 1000)
+
+    def set_subtitle_scale(self, scale: int):
+        # --sub-text-scale es una opcion de instancia (modulo freetype): no
+        # hay setter en caliente en el MediaPlayer, asi que solo cambia el
+        # valor objetivo aqui; load() recrea el Instance en la proxima carga
+        # (ver la comparacion con _instance_subtitle_scale mas arriba).
+        self._subtitle_scale = scale
+
     # -- video -------------------------------------------------------------
+    def set_video_scale(self, factor: float):
+        self.media_player.video_set_scale(factor)
+
     def take_snapshot(self, path: str, width: int = 0, height: int = 0):
         self.media_player.video_take_snapshot(0, path, width, height)
 
