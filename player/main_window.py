@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 
 from .backend import VLCPlayer
+from .bookmarks import add_bookmark
+from .bookmarks_dialog import BookmarksDialog
 from .formats import ALL_EXTS, build_open_filter, format_time, is_url
 from .resume import clear_position, get_saved_position_ms, save_position
 from .subtitle_dialog import OnlineSubtitleDialog
@@ -147,6 +149,7 @@ class MainWindow(QMainWindow):
         self._advancing = False
         self._dock_was_visible = True
         self.equalizer_dialog = None
+        self.bookmarks_dialog = None
         self.loop_point_a = None
         self.loop_point_b = None
         self.on_finish_action = "none"
@@ -386,6 +389,14 @@ class MainWindow(QMainWindow):
             on_finish_group.addAction(action)
             self.menu_on_finish.addAction(action)
 
+        act_add_bookmark = QAction("Agregar marcador aquí", self, shortcut="B")
+        act_add_bookmark.triggered.connect(self.quick_add_bookmark)
+        menu_playback.addAction(act_add_bookmark)
+
+        act_show_bookmarks = QAction("Ver marcadores...", self)
+        act_show_bookmarks.triggered.connect(self.show_bookmarks)
+        menu_playback.addAction(act_show_bookmarks)
+
         # -- Audio --
         menu_audio = menubar.addMenu("&Audio")
         act_mute = QAction("Silenciar", self, shortcut="M")
@@ -596,6 +607,9 @@ class MainWindow(QMainWindow):
         self.loop_point_a = None
         self.loop_point_b = None
         self.btn_ab_loop.setText("A-B")
+        if self.bookmarks_dialog is not None:
+            self.bookmarks_dialog.close()
+            self.bookmarks_dialog = None
         self.player.load(path, enable_visualizer=self.act_visualizer.isChecked())
         self.player.attach_video_output(self.video_frame)
         self.player.play()
@@ -721,6 +735,27 @@ class MainWindow(QMainWindow):
             self.loop_point_a = None
             self.loop_point_b = None
             self.btn_ab_loop.setText("A-B")
+
+    def quick_add_bookmark(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            return
+        position_ms = self.player.get_time_ms()
+        default_name = f"Marcador {format_time(position_ms)}"
+        name, ok = QInputDialog.getText(self, "Nuevo marcador", "Nombre:", text=default_name)
+        if ok and name.strip():
+            add_bookmark(path, name.strip(), position_ms)
+            self.statusBar().showMessage(f'Marcador "{name.strip()}" agregado en {format_time(position_ms)}', 3000)
+
+    def show_bookmarks(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            QMessageBox.information(self, "Marcadores", "Esta función solo funciona con archivos locales.")
+            return
+        if self.bookmarks_dialog is not None:
+            self.bookmarks_dialog.close()
+        self.bookmarks_dialog = BookmarksDialog(self.player, path, self)
+        self.bookmarks_dialog.show()
 
     # ------------------------------------------------------------ sliders
     def _on_slider_pressed(self):

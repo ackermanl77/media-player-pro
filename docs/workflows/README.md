@@ -11,6 +11,7 @@ estado de la release y problemas conocidos, la fuente de verdad es
 - [Lista de reproducción](playlist/workflow.md)
 - [Recordar posición de reproducción](resume-playback/workflow.md)
 - [Repetición A-B](ab-loop/workflow.md)
+- [Marcadores nombrados por archivo](bookmarks/workflow.md)
 
 ## Audio
 

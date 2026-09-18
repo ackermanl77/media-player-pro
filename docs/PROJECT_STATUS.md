@@ -47,6 +47,7 @@ tener VLC instalado.
 | Envoltorio sobre libVLC (transporte, volumen, pistas, ecualizador, visualizador) | `player/backend.py::VLCPlayer` |
 | Formatos soportados y helpers puros (tiempo, rutas, filtros de diálogo) | `player/formats.py` |
 | Posiciones de reproducción recordadas entre sesiones | `player/resume.py` |
+| Marcadores nombrados por archivo | `player/bookmarks.py`, `player/bookmarks_dialog.py` |
 | Configuración persistente del usuario (API keys) | `player/config.py` |
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
@@ -158,15 +159,34 @@ player instalado aparte, igual que al correr desde el código fuente.
   archivo descargado llega hasta `VLCPlayer.load_subtitle_file()`). Ver
   [docs/workflows/online-subtitles/workflow.md](workflows/online-subtitles/workflow.md).
 
+- **Séptima función inspirada en BS.Player: marcadores nombrados
+  múltiples por archivo** (la segunda de las dos funciones de mayor
+  alcance que se habían dejado pendientes). A diferencia de "recordar
+  posición" (un único punto automático), esto guarda varios puntos con
+  nombre por archivo. `player/bookmarks.py` (módulo puro, mismo patrón
+  que `resume.py`) mantiene la lista siempre ordenada por posición en
+  `~/.reproductor_multimedia_pro/bookmarks.json`;
+  `player/bookmarks_dialog.py::BookmarksDialog` es la UI (agregar/ir
+  a/renombrar/eliminar), cerrada automáticamente al cambiar de pista
+  porque queda atada al archivo con el que se abrió. Atajo `B` para
+  agregar uno rápido en la posición actual. `tests/test_bookmarks.py`
+  (10 tests, sin VLC/Qt) cubre el ordenamiento, el aislamiento entre
+  archivos, y los casos borde de eliminar el último marcador de un
+  archivo o un índice fuera de rango. Verificado además en vivo contra
+  la app real: agregar, "ir a" (saltó exactamente a la posición
+  guardada), renombrar, eliminar, y confirmar que el diálogo se cierra
+  al pasar por `play_index()`. Ver
+  [docs/workflows/bookmarks/workflow.md](workflows/bookmarks/workflow.md).
+
 ## Verification
 
 ```bash
 python -m pytest -q
 ```
 
-`tests/test_formats.py`, `test_resume.py` y `test_opensubtitles.py` no
-dependen de VLC ni de Qt (este último tampoco toca la red real: mockea
-`requests`). El resto de la suite (`test_backend.py`, `test_visualizer.py`,
+`tests/test_formats.py`, `test_resume.py`, `test_bookmarks.py` y
+`test_opensubtitles.py` no dependen de VLC ni de Qt (este último tampoco
+toca la red real: mockea `requests`). El resto de la suite (`test_backend.py`, `test_visualizer.py`,
 `test_app_smoke.py`, `test_on_finish_action.py`) importa `vlc` de verdad y
 se **omite automáticamente** (no falla) si no hay VLC instalado en la
 máquina — son pruebas de humo reales contra libVLC, no mocks. Corre

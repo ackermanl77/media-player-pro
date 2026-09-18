@@ -69,6 +69,11 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - **Búsqueda y descarga de subtítulos online** (menú Video → "Buscar
   subtítulos online..."), vía la API de OpenSubtitles — requiere tu
   propia API key gratuita, ver [Requisitos](#requisitos) más abajo.
+- **Marcadores nombrados por archivo** (menú Reproducción): guarda varios
+  puntos con nombre por archivo (no solo uno automático), para saltar
+  directo a una escena — tecla `B` para agregar uno rápido en la posición
+  actual, "Ver marcadores..." para administrarlos (ir a / renombrar /
+  eliminar).
 
 ## Atajos de teclado
 
@@ -86,6 +91,7 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 | M                | Silenciar                  |
 | G                | Adelantar subtítulos 50 ms |
 | H                | Retrasar subtítulos 50 ms  |
+| B                | Agregar marcador aquí      |
 
 ## Desarrollo
 
