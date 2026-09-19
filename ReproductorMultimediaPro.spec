@@ -10,11 +10,19 @@ from PyInstaller.utils.hooks import collect_submodules
 hiddenimports = ["player.backend", "player.main_window", "player.formats"]
 hiddenimports += collect_submodules("player")
 
+# player/main_window.py busca los iconos en <MEIPASS>/assets/... cuando esta
+# empaquetado (ver _icon_path en ese archivo) -- deben quedar en esa carpeta
+# dentro del bundle, no junto al resto del paquete "player".
+datas = [
+    ("player/assets/icon.png", "assets"),
+    ("player/assets/icon.ico", "assets"),
+]
+
 a = Analysis(
     ["run.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -36,4 +44,5 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon="player/assets/icon.ico",
 )

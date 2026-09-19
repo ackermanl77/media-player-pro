@@ -14,7 +14,9 @@ abierto mientras se sigue usando el reproductor).
 1. Marcar "Activar ecualizador" para habilitarlo (desactivado por
    defecto — sin tocarlo, el audio suena sin procesar).
 2. Elegir un preset del combo, o mover manualmente el slider de preamp y
-   los 10 sliders de banda (rango -20 dB a +20 dB cada uno).
+   los 10 sliders de banda (rango -20 dB a +20 dB cada uno). Cada slider
+   tiene una etiqueta arriba (`+6 dB`, `-3 dB`, ...) que se actualiza en
+   vivo mientras se arrastra, o al aplicar un preset.
 
 El diálogo es un singleton por ventana (`MainWindow.equalizer_dialog`):
 abrirlo dos veces reusa la misma instancia en vez de crear una nueva, así
@@ -37,3 +39,7 @@ construye el diálogo real contra un VLC real (sin pantalla, plataforma Qt
 auditivamente que cada banda modifique el sonido de forma audible — la
 correctitud de esa parte descansa en `vlc.AudioEqualizer`, no en código de
 este proyecto.
+
+Verificado en vivo que las etiquetas de dB reflejan el valor exacto:
+mover una banda a `+7` y el preamp a `-4` deja sus respectivas etiquetas
+en `+7 dB` y `-4 dB`.

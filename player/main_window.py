@@ -5,7 +5,7 @@ import sys
 
 import vlc
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -29,12 +29,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .backend import VLCPlayer
-from .bookmarks import add_bookmark
+from .bookmarks import add_bookmark, get_bookmarks
 from .bookmarks_dialog import BookmarksDialog
-from .formats import ALL_EXTS, build_open_filter, format_time, is_url
+from .formats import ALL_EXTS, build_open_filter, format_time, is_audio_file, is_url
 from .resume import clear_position, get_saved_position_ms, save_position
 from .subtitle_dialog import OnlineSubtitleDialog
+
+# Marcadores y punto A/B pintados sobre la barra de progreso.
+_LOOP_MARKER_COLOR = QColor("#ff8c3c")
+_BOOKMARK_MARKER_COLOR = QColor("#ffd23c")
+
+
+def _icon_path(filename: str) -> str:
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, "assets", filename)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", filename)
 
 
 class VideoFrame(QFrame):
@@ -43,6 +54,33 @@ class VideoFrame(QFrame):
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
         super().mouseDoubleClickEvent(event)
+
+
+class PositionSlider(QSlider):
+    """QSlider que además dibuja marcadores (punto A/B, marcadores
+    nombrados) como pequeñas líneas de color sobre la barra."""
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self._markers = []  # lista de (fraccion 0..1, QColor)
+
+    def set_markers(self, markers):
+        self._markers = markers
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._markers:
+            return
+        handle_width = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
+        usable_width = max(0, self.width() - handle_width)
+        painter = QPainter(self)
+        for fraction, color in self._markers:
+            x = handle_width // 2 + int(max(0.0, min(1.0, fraction)) * usable_width)
+            pen = QPen(color)
+            pen.setWidth(3)
+            painter.setPen(pen)
+            painter.drawLine(x, self.height() - 7, x, self.height() - 1)
 
 
 class EqualizerDialog(QDialog):
@@ -68,6 +106,8 @@ class EqualizerDialog(QDialog):
         freqs = player.equalizer_band_frequencies()
 
         preamp_box = QVBoxLayout()
+        self.preamp_value_label = QLabel("0 dB")
+        preamp_box.addWidget(self.preamp_value_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.preamp_slider = QSlider(Qt.Orientation.Vertical)
         self.preamp_slider.setRange(-20, 20)
         self.preamp_slider.setValue(0)
@@ -77,8 +117,11 @@ class EqualizerDialog(QDialog):
         bands_layout.addLayout(preamp_box)
 
         self.band_sliders = []
+        self.band_value_labels = []
         for i, freq in enumerate(freqs):
             box = QVBoxLayout()
+            value_label = QLabel("0 dB")
+            box.addWidget(value_label, alignment=Qt.AlignmentFlag.AlignHCenter)
             slider = QSlider(Qt.Orientation.Vertical)
             slider.setRange(-20, 20)
             slider.setValue(0)
@@ -88,6 +131,7 @@ class EqualizerDialog(QDialog):
             box.addWidget(QLabel(label_text), alignment=Qt.AlignmentFlag.AlignHCenter)
             bands_layout.addLayout(box)
             self.band_sliders.append(slider)
+            self.band_value_labels.append(value_label)
         layout.addLayout(bands_layout)
 
         self.set_controls_enabled(False)
@@ -119,19 +163,25 @@ class EqualizerDialog(QDialog):
             return
         self.player.apply_equalizer_preset(preset_index)
         eq = self.player.get_equalizer()
+        preamp_val = int(eq.get_preamp())
         self.preamp_slider.blockSignals(True)
-        self.preamp_slider.setValue(int(eq.get_preamp()))
+        self.preamp_slider.setValue(preamp_val)
         self.preamp_slider.blockSignals(False)
+        self.preamp_value_label.setText(f"{preamp_val:+d} dB")
         for i, slider in enumerate(self.band_sliders):
+            band_val = int(eq.get_amp_at_index(i))
             slider.blockSignals(True)
-            slider.setValue(int(eq.get_amp_at_index(i)))
+            slider.setValue(band_val)
             slider.blockSignals(False)
+            self.band_value_labels[i].setText(f"{band_val:+d} dB")
 
     def on_preamp_changed(self, val: int):
+        self.preamp_value_label.setText(f"{val:+d} dB")
         if self.enable_checkbox.isChecked():
             self.player.set_equalizer_preamp(float(val))
 
     def on_band_changed(self, idx: int, val: int):
+        self.band_value_labels[idx].setText(f"{val:+d} dB")
         if self.enable_checkbox.isChecked():
             self.player.set_equalizer_band(idx, float(val))
 
@@ -140,6 +190,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Reproductor Multimedia Pro")
+        self.setWindowIcon(QIcon(_icon_path("icon.png")))
 
         self.player = VLCPlayer()
         self.current_index = -1
@@ -153,6 +204,7 @@ class MainWindow(QMainWindow):
         self.loop_point_a = None
         self.loop_point_b = None
         self.on_finish_action = "none"
+        self._known_durations = {}  # ruta -> largo en ms, para mostrarlo en la playlist
 
         self.setAcceptDrops(True)
 
@@ -216,8 +268,11 @@ class MainWindow(QMainWindow):
 
         seek_row = QHBoxLayout()
         self.label_time_current = QLabel("00:00")
-        self.position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.position_slider = PositionSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 1000)
+        self.position_slider.setToolTip(
+            "Arrastra para buscar. Las marcas naranjas son el tramo A-B; las doradas, marcadores nombrados."
+        )
         self.label_time_total = QLabel("00:00")
         seek_row.addWidget(self.label_time_current)
         seek_row.addWidget(self.position_slider, stretch=1)
@@ -235,18 +290,22 @@ class MainWindow(QMainWindow):
 
         self.btn_prev = QPushButton()
         self.btn_prev.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaSkipBackward))
+        self.btn_prev.setToolTip("Pista anterior (Ctrl+Izquierda)")
         self.btn_prev.clicked.connect(self.play_previous)
 
         self.btn_play = QPushButton()
         self.btn_play.setIcon(self.icon_play)
+        self.btn_play.setToolTip("Reproducir/Pausar (Espacio)")
         self.btn_play.clicked.connect(self.toggle_play_pause)
 
         self.btn_stop = QPushButton()
         self.btn_stop.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.btn_stop.setToolTip("Detener")
         self.btn_stop.clicked.connect(self.stop)
 
         self.btn_next = QPushButton()
         self.btn_next.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaSkipForward))
+        self.btn_next.setToolTip("Siguiente pista (Ctrl+Derecha)")
         self.btn_next.clicked.connect(lambda: self.play_next(auto=False))
 
         for b in (self.btn_prev, self.btn_play, self.btn_stop, self.btn_next):
@@ -258,14 +317,21 @@ class MainWindow(QMainWindow):
         self.icon_volume = style.standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
         self.icon_muted = style.standardIcon(QStyle.StandardPixmap.SP_MediaVolumeMuted)
         self.btn_mute.setIcon(self.icon_volume)
+        self.btn_mute.setToolTip("Silenciar (M)")
         self.btn_mute.clicked.connect(self.toggle_mute)
         buttons_row.addWidget(self.btn_mute)
 
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 150)
         self.volume_slider.setFixedWidth(120)
+        self.volume_slider.setToolTip("Volumen (flechas arriba/abajo)")
         self.volume_slider.valueChanged.connect(self.player.set_volume)
         buttons_row.addWidget(self.volume_slider)
+
+        self.label_volume_percent = QLabel("80%")
+        self.label_volume_percent.setFixedWidth(36)
+        self.volume_slider.valueChanged.connect(lambda v: self.label_volume_percent.setText(f"{v}%"))
+        buttons_row.addWidget(self.label_volume_percent)
 
         buttons_row.addSpacing(16)
 
@@ -275,6 +341,7 @@ class MainWindow(QMainWindow):
                               ("1.25x", 1.25), ("1.5x", 1.5), ("2.0x", 2.0)):
             self.speed_combo.addItem(label, value)
         self.speed_combo.setCurrentIndex(2)
+        self.speed_combo.setToolTip("Velocidad de reproducción")
         self.speed_combo.currentIndexChanged.connect(
             lambda: self.player.set_rate(self.speed_combo.currentData())
         )
@@ -284,10 +351,12 @@ class MainWindow(QMainWindow):
 
         self.btn_shuffle = QPushButton("Aleatorio")
         self.btn_shuffle.setCheckable(True)
+        self.btn_shuffle.setToolTip("Reproducir la playlist en orden aleatorio")
         self.btn_shuffle.toggled.connect(self._on_shuffle_toggled)
         buttons_row.addWidget(self.btn_shuffle)
 
         self.btn_repeat = QPushButton("Repetir: No")
+        self.btn_repeat.setToolTip("Cicla entre No repetir / Repetir todo / Repetir uno")
         self.btn_repeat.clicked.connect(self._cycle_repeat_mode)
         buttons_row.addWidget(self.btn_repeat)
 
@@ -301,6 +370,7 @@ class MainWindow(QMainWindow):
 
         self.btn_fullscreen = QPushButton()
         self.btn_fullscreen.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
+        self.btn_fullscreen.setToolTip("Pantalla completa (F)")
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         buttons_row.addWidget(self.btn_fullscreen)
 
@@ -371,6 +441,8 @@ class MainWindow(QMainWindow):
         act_prev.triggered.connect(self.play_previous)
         menu_playback.addAction(act_prev)
 
+        menu_playback.addSeparator()
+
         self.menu_on_finish = menu_playback.addMenu("Al terminar la lista")
         on_finish_group = QActionGroup(self.menu_on_finish)
         on_finish_group.setExclusive(True)
@@ -388,6 +460,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked, k=key: setattr(self, "on_finish_action", k))
             on_finish_group.addAction(action)
             self.menu_on_finish.addAction(action)
+
+        menu_playback.addSeparator()
 
         act_add_bookmark = QAction("Agregar marcador aquí", self, shortcut="B")
         act_add_bookmark.triggered.connect(self.quick_add_bookmark)
@@ -424,6 +498,8 @@ class MainWindow(QMainWindow):
         act_snapshot.triggered.connect(self.take_snapshot)
         menu_video.addAction(act_snapshot)
 
+        menu_video.addSeparator()
+
         self.menu_subtitle_tracks = menu_video.addMenu("Subtítulos")
         self.menu_subtitle_tracks.aboutToShow.connect(self._populate_subtitle_track_menu)
 
@@ -456,6 +532,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked, s=scale: self._on_subtitle_scale_changed(s))
             sub_size_group.addAction(action)
             self.menu_sub_size.addAction(action)
+
+        menu_video.addSeparator()
 
         self.menu_zoom = menu_video.addMenu("Zoom")
         zoom_group = QActionGroup(self.menu_zoom)
@@ -494,13 +572,21 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ playlist
     def _display_name(self, path: str) -> str:
-        return path if is_url(path) else os.path.basename(path)
+        if is_url(path):
+            return f"🌐 {path}"
+        prefix = "🎵" if is_audio_file(path) else "🎬"
+        return f"{prefix} {os.path.basename(path)}"
 
     def add_files_to_playlist(self, paths):
         for p in paths:
             item = QListWidgetItem(self._display_name(p))
             item.setData(Qt.ItemDataRole.UserRole, p)
             self.playlist_widget.addItem(item)
+
+    def _update_playlist_item_duration(self, index: int, path: str, length_ms: int):
+        item = self.playlist_widget.item(index)
+        if item is not None:
+            item.setText(f"{self._display_name(path)} — {format_time(length_ms)}")
 
     def open_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -736,6 +822,18 @@ class MainWindow(QMainWindow):
             self.loop_point_b = None
             self.btn_ab_loop.setText("A-B")
 
+    def _refresh_position_markers(self, length_ms: int):
+        markers = []
+        if self.loop_point_a is not None:
+            markers.append((self.loop_point_a / length_ms, _LOOP_MARKER_COLOR))
+        if self.loop_point_b is not None:
+            markers.append((self.loop_point_b / length_ms, _LOOP_MARKER_COLOR))
+        path = self._current_path_or_none()
+        if path is not None and not is_url(path):
+            for b in get_bookmarks(path):
+                markers.append((b["position_ms"] / length_ms, _BOOKMARK_MARKER_COLOR))
+        self.position_slider.set_markers(markers)
+
     def quick_add_bookmark(self):
         path = self._current_path_or_none()
         if path is None or is_url(path):
@@ -793,6 +891,12 @@ class MainWindow(QMainWindow):
             self.position_slider.blockSignals(False)
             self.label_time_current.setText(format_time(self.player.get_time_ms()))
             self.label_time_total.setText(format_time(length))
+            self._refresh_position_markers(length)
+
+            path = self._current_path_or_none()
+            if path is not None and path not in self._known_durations:
+                self._known_durations[path] = length
+                self._update_playlist_item_duration(self.current_index, path, length)
 
         self.btn_play.setIcon(self.icon_pause if self.player.is_playing() else self.icon_play)
 
@@ -954,6 +1058,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "Acerca de Reproductor Multimedia Pro",
+            f"Reproductor Multimedia Pro v{__version__}\n\n"
             "Reproductor de música y video de alta calidad.\n\n"
             "Motor de decodificación: libVLC (python-vlc)\n"
             "Interfaz: PySide6\n\n"

@@ -30,8 +30,13 @@ dist/ReproductorMultimediaPro.exe
 ```
 
 `ReproductorMultimediaPro.spec` construye desde `run.py`, con
-`console=False` (sin ventana de consola, igual que `run.pyw`) y un icono
-por defecto de PyInstaller. **No empaqueta VLC**: `libvlc.dll` varía por
+`console=False` (sin ventana de consola, igual que `run.pyw`) y el ícono
+propio de la app (`player/assets/icon.ico`, vía el parámetro `icon=` de
+`EXE()`) en vez del genérico de PyInstaller. El `.spec` también declara
+`datas` para empaquetar `player/assets/icon.png`/`icon.ico` dentro del
+`.exe` — `player/main_window.py::_icon_path()` los busca en
+`sys._MEIPASS/assets/` cuando corre empaquetado, o en `player/assets/`
+cuando corre desde el código fuente. **No empaqueta VLC**: `libvlc.dll` varía por
 versión/arquitectura y VLC ya se instala y actualiza por su cuenta, así
 que la máquina que ejecute el `.exe` sigue necesitando VLC media player
 instalado aparte (ver "Known Issues" en `docs/PROJECT_STATUS.md`).
@@ -59,7 +64,12 @@ Confirmar que:
 Esto ejercita en un solo paso tanto la normalización de rutas como la
 recreación de instancia del visualizador (ver "Recently Fixed" en
 `docs/PROJECT_STATUS.md`) dentro del binario empaquetado, no solo en el
-código fuente.
+código fuente. También confirma que `_icon_path()` encuentra los assets
+empaquetados correctamente (`sys._MEIPASS/assets/...`) — si el `.spec`
+dejara de declarar los `datas` correctos, la app arrancaría igual (el
+`QIcon` de una ruta inexistente simplemente queda vacío en vez de lanzar
+una excepción), así que un ícono de ventana visible es la única señal de
+que el empaquetado del asset funcionó.
 
 ## Distribución
 

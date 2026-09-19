@@ -51,6 +51,8 @@ tener VLC instalado.
 | Configuración persistente del usuario (API keys) | `player/config.py` |
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
+| Ícono de la app (ventana + `.exe`) | `player/assets/icon.png`, `player/assets/icon.ico` |
+| Número de versión | `player.__version__` |
 | Receta de PyInstaller para el ejecutable de Windows | `ReproductorMultimediaPro.spec` |
 
 ## Release
@@ -177,6 +179,46 @@ player instalado aparte, igual que al correr desde el código fuente.
   guardada), renombrar, eliminar, y confirmar que el diálogo se cierra
   al pasar por `play_index()`. Ver
   [docs/workflows/bookmarks/workflow.md](workflows/bookmarks/workflow.md).
+
+- **Pasada de pulido de UI**, tras una revisión enfocada en la interfaz
+  (`main_window.py` había crecido bastante con las 7 funciones anteriores).
+  Cinco arreglos rápidos: (1) **ícono propio de la app** —
+  `player/assets/icon.{png,ico}` (generado con Pillow como paso de build
+  puntual, sin agregar Pillow como dependencia del proyecto), usado como
+  ícono de ventana en runtime (`QIcon`, vía el nuevo helper `_icon_path()`
+  que resuelve la ruta tanto corriendo desde el código fuente como
+  empaquetado con `sys._MEIPASS`) y como ícono del propio `.exe` (parámetro
+  `icon=` en `ReproductorMultimediaPro.spec`, que ahora también declara
+  `datas` para empaquetar ambos archivos). (2) Porcentaje de volumen
+  visible junto al slider. (3) Tooltips en todos los controles de la barra
+  que no los tenían. (4) Separadores agrupando los menús "Reproducción" y
+  "Video", que se habían vuelto largos y planos. (5) Número de versión
+  (`player.__version__`, nuevo) en "Acerca de".
+
+  Más tres mejoras de mayor alcance: **marcadores visuales en la barra de
+  progreso** — `PositionSlider` (subclase de `QSlider` que pinta líneas de
+  color sobre la barra en `paintEvent`) muestra el punto A/B (naranja) y
+  los marcadores nombrados (dorado) del archivo actual, recalculados en
+  cada tick de `update_ui()`; **valores en dB en el ecualizador** —
+  `EqualizerDialog` ahora tiene una etiqueta por slider (preamp + cada
+  banda) que se actualiza en vivo al arrastrar, y también al aplicar un
+  preset; **íconos y duración por pista en la playlist** — `_display_name()`
+  antepone 🎵/🎬/🌐 según el tipo, y cada ítem gana su duración
+  (`MM:SS`) la primera vez que esa pista efectivamente se reproduce y VLC
+  reporta su largo (no se pre-calcula toda la playlist por adelantado,
+  para no bloquear la interfaz analizando archivos que quizás nunca se
+  reproduzcan).
+
+  Verificado en vivo contra la app real y un video real de 12s: ícono de
+  ventana no vacío, cero botones sin tooltip, el label de volumen sigue al
+  slider, el ítem de playlist pasa de solo-ícono a "ícono — duración"
+  después de reproducir, marcar A/B más un marcador nombrado produce
+  exactamente 3 marcadores en las fracciones y colores esperados, y mover
+  un slider del ecualizador actualiza su etiqueta al valor exacto. También
+  se generó un build real de PyInstaller con el `.spec` actualizado
+  (confirmado en el log: "Copying icon to EXE") y se lanzó el `.exe`
+  resultante para confirmar que los assets empaquetados se cargan sin
+  error fuera del entorno de desarrollo.
 
 ## Verification
 

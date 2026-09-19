@@ -20,6 +20,12 @@ marcadores. El diálogo está atado al archivo que estaba cargado cuando se
 abrió: cambiar de pista lo cierra automáticamente (los marcadores de un
 archivo no tienen sentido mostrados sobre otro).
 
+Cada marcador del archivo actual aparece como una línea dorada sobre la
+barra de progreso (recalculadas en cada tick de `update_ui()`, ver
+[docs/workflows/ab-loop/workflow.md](../ab-loop/workflow.md) para el
+mecanismo de dibujo, compartido con los puntos A/B), sin necesidad de
+abrir el diálogo para saber dónde están.
+
 ## Dónde viven
 
 `~/.reproductor_multimedia_pro/bookmarks.json` — `{"ruta_absoluta":

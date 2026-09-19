@@ -10,7 +10,12 @@ aleatorio/repetir, y poder guardar/recuperar esa cola como un archivo
 
 - **Agregar contenido**: Archivo → Abrir archivos/carpeta/URL, o arrastrar
   y soltar sobre la ventana. Si la playlist estaba vacía, el primer
-  elemento agregado se reproduce automáticamente.
+  elemento agregado se reproduce automáticamente. Cada ítem muestra un
+  ícono según su tipo (🎵 audio, 🎬 video, 🌐 stream/URL) desde que se
+  agrega; su duración (`MM:SS`) se agrega al texto la primera vez que esa
+  pista se reproduce y VLC reporta su largo — no se calcula por
+  adelantado para toda la lista, para no bloquear la interfaz analizando
+  archivos que quizás nunca lleguen a reproducirse.
 - **Reproducir un elemento específico**: doble clic sobre él en el panel
   "Lista de reproducción" (dock a la derecha, se puede ocultar/mostrar
   desde el menú Ver).
