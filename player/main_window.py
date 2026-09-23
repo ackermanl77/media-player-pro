@@ -2,12 +2,14 @@ import os
 import random
 import subprocess
 import sys
+import tempfile
 
 import vlc
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen, QShortcut
+from PySide6.QtCore import QEvent, Qt, QPoint, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,6 +36,7 @@ from .backend import VLCPlayer
 from .bookmarks import add_bookmark, get_bookmarks
 from .bookmarks_dialog import BookmarksDialog
 from .formats import ALL_EXTS, build_open_filter, format_time, is_audio_file, is_url
+from .recent_files import add_recent_file, clear_recent_files, get_recent_files
 from .resume import clear_position, get_saved_position_ms, save_position
 from .subtitle_dialog import OnlineSubtitleDialog
 
@@ -50,23 +53,48 @@ def _icon_path(filename: str) -> str:
 
 class VideoFrame(QFrame):
     doubleClicked = Signal()
+    mouseMoved = Signal()
 
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
         super().mouseDoubleClickEvent(event)
 
+    def mouseMoveEvent(self, event):
+        self.mouseMoved.emit()
+        super().mouseMoveEvent(event)
+
 
 class PositionSlider(QSlider):
     """QSlider que además dibuja marcadores (punto A/B, marcadores
-    nombrados) como pequeñas líneas de color sobre la barra."""
+    nombrados) como pequeñas líneas de color sobre la barra, y emite
+    hovered(fraccion, posicion_global) mientras el mouse se mueve encima
+    (usado por MainWindow para la miniatura de vista previa)."""
+
+    hovered = Signal(float, QPoint)
+    hoverEnded = Signal()
 
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         self._markers = []  # lista de (fraccion 0..1, QColor)
+        self.setMouseTracking(True)
 
     def set_markers(self, markers):
         self._markers = markers
         self.update()
+
+    def _fraction_at(self, x: int) -> float:
+        handle_width = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
+        usable_width = max(1, self.width() - handle_width)
+        return max(0.0, min(1.0, (x - handle_width / 2) / usable_width))
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        fraction = self._fraction_at(int(event.position().x()))
+        self.hovered.emit(fraction, event.globalPosition().toPoint())
+
+    def leaveEvent(self, event):
+        self.hoverEnded.emit()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -206,11 +234,45 @@ class MainWindow(QMainWindow):
         self.on_finish_action = "none"
         self._known_durations = {}  # ruta -> largo en ms, para mostrarlo en la playlist
 
+        # Vista previa en miniatura al pasar el mouse por la barra de
+        # progreso (ver _on_slider_hovered / _show_hover_preview).
+        self._preview_popup = None
+        self._preview_video_widget = None
+        self._pending_hover_fraction = None
+        self._pending_hover_pos = None
+        self._preview_hover_timer = QTimer(self)
+        self._preview_hover_timer.setSingleShot(True)
+        self._preview_hover_timer.setInterval(300)  # debounce: espera a que el mouse se detenga
+        self._preview_hover_timer.timeout.connect(self._show_hover_preview)
+        self._preview_snapshot_path = os.path.join(tempfile.gettempdir(), "reproductor_multimedia_pro_preview.png")
+
+        # OSD (on-screen display) transitoria sobre el video -- ver _show_osd.
+        self._osd_timer = QTimer(self)
+        self._osd_timer.setSingleShot(True)
+        self._osd_timer.setInterval(1500)
+
+        # Controles flotantes en pantalla completa -- ver _enter_fullscreen /
+        # _on_fullscreen_mouse_activity. Reutilizan self.controls_bar en vez
+        # de duplicar cada boton.
+        self._fullscreen_idle_timer = QTimer(self)
+        self._fullscreen_idle_timer.setSingleShot(True)
+        self._fullscreen_idle_timer.setInterval(2500)
+        self._fullscreen_idle_timer.timeout.connect(self._hide_floating_controls)
+
         self.setAcceptDrops(True)
 
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
+
+        self._osd_label.hide()
+        self._osd_timer.timeout.connect(self._osd_label.hide)
+
+        # Escucha movimientos de mouse en toda la app (no solo en video_frame)
+        # para que mover el mouse sobre los propios controles flotantes
+        # tambien cuente como actividad y no los oculte mientras se usan.
+        QApplication.instance().installEventFilter(self)
+        self.video_frame.mouseMoved.connect(self._on_fullscreen_mouse_activity)
 
         self.player.set_volume(80)
         self.volume_slider.setValue(80)
@@ -233,13 +295,37 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.black)
         self.video_frame.setPalette(palette)
         self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        self.video_frame.setMouseTracking(True)
         self.video_frame.doubleClicked.connect(self.toggle_fullscreen)
         central_layout.addWidget(self.video_frame, stretch=1)
 
+        # OSD (ver _show_osd): overlay flotante sobre el video, oculto salvo
+        # cuando hay un mensaje transitorio que mostrar.
+        self._osd_label = QLabel(self.video_frame)
+        self._osd_label.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 170); color: white; padding: 6px 16px;"
+            "border-radius: 8px; font-size: 13pt;"
+        )
+        self._osd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         self.controls_bar = self._build_controls_bar()
+        self._enable_mouse_tracking_recursive(self.controls_bar)
         central_layout.addWidget(self.controls_bar)
 
         self.setCentralWidget(central)
+
+        # Widget invisible dedicado solo a darle a libVLC una ventana nativa
+        # para el reproductor secundario de miniaturas de vista previa (ver
+        # VLCPlayer.attach_preview_output). Nunca se muestra: crear su
+        # winId() nativo alcanza para que libVLC pueda dibujar en él.
+        self._preview_video_widget = VideoFrame(self)
+        self._preview_video_widget.setFixedSize(160, 90)
+        self._preview_video_widget.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        self._preview_video_widget.move(-1000, -1000)
+        self.player.attach_preview_output(self._preview_video_widget)
+
+        self.position_slider.hovered.connect(self._on_slider_hovered)
+        self.position_slider.hoverEnded.connect(self._on_slider_hover_ended)
 
         # Playlist dock
         self.playlist_widget = QListWidget()
@@ -260,6 +346,15 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.playlist_dock)
 
         self.statusBar().showMessage("Listo")
+
+    def _enable_mouse_tracking_recursive(self, widget: QWidget):
+        """Sin esto, un QWidget solo genera mouseMoveEvent con algun boton
+        del mouse presionado; hace falta en cada widget de controls_bar para
+        que moverse sobre los controles flotantes en pantalla completa
+        cuente como actividad (ver _on_fullscreen_mouse_activity)."""
+        widget.setMouseTracking(True)
+        for child in widget.findChildren(QWidget):
+            child.setMouseTracking(True)
 
     def _build_controls_bar(self) -> QWidget:
         bar = QWidget()
@@ -407,6 +502,9 @@ class MainWindow(QMainWindow):
         act_open_url.triggered.connect(self.open_url)
         menu_file.addAction(act_open_url)
 
+        self.menu_recent_files = menu_file.addMenu("Abrir reciente")
+        self.menu_recent_files.aboutToShow.connect(self._populate_recent_files_menu)
+
         menu_file.addSeparator()
 
         act_save_playlist = QAction("Guardar lista (.m3u)...", self)
@@ -440,6 +538,11 @@ class MainWindow(QMainWindow):
         act_prev = QAction("Anterior", self, shortcut="Ctrl+Left")
         act_prev.triggered.connect(self.play_previous)
         menu_playback.addAction(act_prev)
+
+        act_next_frame = QAction("Avanzar un fotograma", self, shortcut=".")
+        act_next_frame.setToolTip("Avanza un solo fotograma (el video debe estar en pausa)")
+        act_next_frame.triggered.connect(self.step_frame)
+        menu_playback.addAction(act_next_frame)
 
         menu_playback.addSeparator()
 
@@ -623,6 +726,31 @@ class MainWindow(QMainWindow):
             self.add_files_to_playlist([url.strip()])
             self.play_index(self.playlist_widget.count() - 1)
 
+    def open_recent_file(self, path: str):
+        if not is_url(path) and not os.path.exists(path):
+            QMessageBox.warning(self, "Archivo reciente", f"No se encontró el archivo:\n{path}")
+            return
+        start_index = self.playlist_widget.count()
+        self.add_files_to_playlist([path])
+        self.play_index(start_index)
+
+    def _populate_recent_files_menu(self):
+        self.menu_recent_files.clear()
+        recent = get_recent_files()
+        if not recent:
+            empty_action = QAction("(vacío)", self.menu_recent_files)
+            empty_action.setEnabled(False)
+            self.menu_recent_files.addAction(empty_action)
+            return
+        for path in recent:
+            action = QAction(self._display_name(path), self.menu_recent_files)
+            action.triggered.connect(lambda _checked, p=path: self.open_recent_file(p))
+            self.menu_recent_files.addAction(action)
+        self.menu_recent_files.addSeparator()
+        act_clear = QAction("Limpiar lista", self.menu_recent_files)
+        act_clear.triggered.connect(clear_recent_files)
+        self.menu_recent_files.addAction(act_clear)
+
     def save_playlist(self):
         if self.playlist_widget.count() == 0:
             return
@@ -703,6 +831,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Reproductor Multimedia Pro — {self._display_name(path)}")
         self.statusBar().showMessage(f"Reproduciendo: {self._display_name(path)}")
         self._maybe_resume_position(path)
+        add_recent_file(path)
 
     def _save_current_position(self):
         path = self._current_path_or_none()
@@ -731,6 +860,15 @@ class MainWindow(QMainWindow):
 
     def stop(self):
         self.player.stop()
+
+    def step_frame(self):
+        if self.current_index == -1:
+            return
+        if not self.player.is_paused():
+            self.statusBar().showMessage("Pausa el video para avanzar fotograma a fotograma", 3000)
+            return
+        if self.player.next_frame():
+            self._show_osd("Fotograma siguiente")
 
     def play_next(self, auto: bool):
         count = self.playlist_widget.count()
@@ -872,9 +1010,99 @@ class MainWindow(QMainWindow):
         if length > 0:
             new_time = min(new_time, length)
         self.player.set_time_ms(new_time)
+        seconds = delta_ms / 1000
+        seconds_str = str(int(seconds)) if seconds == int(seconds) else f"{seconds:g}"
+        sign = "+" if delta_ms >= 0 else ""
+        self._show_osd(f"{sign}{seconds_str}s")
 
     def _nudge_volume(self, delta: int):
         self.volume_slider.setValue(max(0, min(150, self.volume_slider.value() + delta)))
+        self._show_osd(f"Volumen: {self.volume_slider.value()}%")
+
+    # ------------------------------------------------------------------ OSD
+    def _show_osd(self, text: str):
+        """Muestra un mensaje breve y semitransparente sobre el video (p. ej.
+        "+5s", "Volumen: 65%") que se oculta solo tras ~1.5s. Un unico punto
+        de entrada reutilizado por step_frame/_seek_relative/_nudge_volume en
+        vez de que cada uno dibuje su propio overlay."""
+        self._osd_label.setText(text)
+        self._osd_label.adjustSize()
+        x = (self.video_frame.width() - self._osd_label.width()) // 2
+        y = 24
+        self._osd_label.move(max(0, x), y)
+        self._osd_label.raise_()
+        self._osd_label.show()
+        self._osd_timer.start()
+
+    # ------------------------------------------------------- vista previa
+    # Buscar-y-capturar en el reproductor secundario (ver
+    # VLCPlayer.seek_preview/take_preview_snapshot) no es instantáneo: la
+    # búsqueda es asíncrona y libVLC necesita decodificar hasta ese punto
+    # antes de que la captura tenga contenido real. Por eso: (1) el hover se
+    # debounce con _preview_hover_timer (no se dispara en cada mousemove,
+    # solo cuando el mouse se detiene ~300ms sobre la barra), y (2) tras
+    # pedir la búsqueda se espera otro instante corto antes de capturar.
+    def _on_slider_hovered(self, fraction: float, global_pos: QPoint):
+        if self.current_index == -1 or self.player.get_length_ms() <= 0:
+            return
+        self._pending_hover_fraction = fraction
+        self._pending_hover_pos = global_pos
+        self._preview_hover_timer.start()
+
+    def _on_slider_hover_ended(self):
+        self._preview_hover_timer.stop()
+        self._hide_hover_preview()
+
+    def _show_hover_preview(self):
+        path = self._current_path_or_none()
+        if path is None or self._pending_hover_fraction is None or self._pending_hover_pos is None:
+            return
+        if self.player.preview_current_path() != path:
+            self.player.load_preview_media(path)
+        self.player.seek_preview(self._pending_hover_fraction)
+
+        if self._preview_popup is None:
+            self._preview_popup = QWidget(None, Qt.WindowType.ToolTip)
+            self._preview_popup.setStyleSheet("background-color: black; border: 1px solid #888888;")
+            popup_layout = QVBoxLayout(self._preview_popup)
+            popup_layout.setContentsMargins(2, 2, 2, 2)
+            popup_layout.setSpacing(2)
+            self._preview_thumbnail_label = QLabel()
+            self._preview_thumbnail_label.setFixedSize(160, 90)
+            self._preview_thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            popup_layout.addWidget(self._preview_thumbnail_label)
+            self._preview_time_label = QLabel()
+            self._preview_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._preview_time_label.setStyleSheet("color: white; font-size: 9pt;")
+            popup_layout.addWidget(self._preview_time_label)
+
+        # Timestamp que representa la posicion sobre la que esta el mouse
+        # (no la del fotograma capturado todavia, que llega despues via
+        # _capture_hover_snapshot -- la posicion en si es inmediata).
+        self._preview_time_label.setText(format_time(int(self._pending_hover_fraction * self.player.get_length_ms())))
+
+        self._preview_popup.adjustSize()
+        self._preview_popup.move(
+            self._pending_hover_pos.x() - self._preview_popup.width() // 2,
+            self._pending_hover_pos.y() - self._preview_popup.height() - 20,
+        )
+        self._preview_popup.show()
+
+        # Le da tiempo al reproductor secundario a decodificar el fotograma
+        # de la nueva posición antes de intentar capturarlo.
+        QTimer.singleShot(180, self._capture_hover_snapshot)
+
+    def _capture_hover_snapshot(self):
+        if self._preview_popup is None or not self._preview_popup.isVisible():
+            return
+        if self.player.take_preview_snapshot(self._preview_snapshot_path, width=160, height=90):
+            pixmap = QPixmap(self._preview_snapshot_path)
+            if not pixmap.isNull():
+                self._preview_thumbnail_label.setPixmap(pixmap)
+
+    def _hide_hover_preview(self):
+        if self._preview_popup is not None:
+            self._preview_popup.hide()
 
     def toggle_mute(self):
         muted = not self.player.is_muted()
@@ -1013,16 +1241,67 @@ class MainWindow(QMainWindow):
             self._dock_was_visible = self.playlist_dock.isVisible()
             self.playlist_dock.setVisible(False)
             self.menuBar().setVisible(False)
-            self.controls_bar.setVisible(False)
+            self._float_controls_bar()
             self.showFullScreen()
+            self._on_fullscreen_mouse_activity()
 
     def _exit_fullscreen(self):
         if not self.isFullScreen():
             return
+        self._fullscreen_idle_timer.stop()
+        self._unfloat_controls_bar()
         self.showNormal()
         self.playlist_dock.setVisible(self._dock_was_visible)
         self.menuBar().setVisible(True)
-        self.controls_bar.setVisible(True)
+
+    # -- controles flotantes (barra de transporte minima en pantalla completa)
+    def _float_controls_bar(self):
+        """Reparenta controls_bar (en vez de duplicar cada boton) como un
+        overlay flotante sobre video_frame, oculto hasta que haya actividad
+        de mouse -- ver _on_fullscreen_mouse_activity."""
+        self.centralWidget().layout().removeWidget(self.controls_bar)
+        self.controls_bar.setParent(self.video_frame)
+        self.controls_bar.setStyleSheet("background-color: rgba(20, 20, 20, 200);")
+        self.controls_bar.hide()
+
+    def _unfloat_controls_bar(self):
+        self.controls_bar.setParent(None)
+        self.controls_bar.setStyleSheet("")
+        self.centralWidget().layout().addWidget(self.controls_bar)
+        self.controls_bar.show()
+
+    def _reposition_floating_controls(self):
+        if self.controls_bar.parent() is not self.video_frame:
+            return
+        height = self.controls_bar.sizeHint().height()
+        self.controls_bar.setGeometry(0, self.video_frame.height() - height, self.video_frame.width(), height)
+        self.controls_bar.raise_()
+
+    def _show_floating_controls(self):
+        if self.controls_bar.parent() is not self.video_frame:
+            return
+        self._reposition_floating_controls()
+        self.controls_bar.show()
+
+    def _hide_floating_controls(self):
+        if self.controls_bar.parent() is self.video_frame:
+            self.controls_bar.hide()
+
+    def _on_fullscreen_mouse_activity(self):
+        if not self.isFullScreen():
+            return
+        self._show_floating_controls()
+        self._fullscreen_idle_timer.start()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseMove and self.isFullScreen():
+            self._on_fullscreen_mouse_activity()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.isFullScreen():
+            self._reposition_floating_controls()
 
     def _on_always_on_top_toggled(self, checked: bool):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
@@ -1069,4 +1348,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._save_current_position()
         self.player.stop()
+        self.player.release_preview_player()
+        if self._preview_popup is not None:
+            self._preview_popup.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         super().closeEvent(event)

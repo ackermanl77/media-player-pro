@@ -33,6 +33,15 @@ class VLCPlayer:
         self._visualizer_on = False
         self._subtitle_scale = DEFAULT_SUBTITLE_SCALE
         self._instance_subtitle_scale = DEFAULT_SUBTITLE_SCALE
+        # Reproductor secundario, invisible, dedicado solo a generar
+        # miniaturas de vista previa al pasar el mouse por la barra de
+        # progreso -- separado del media_player principal para no
+        # interrumpir la reproduccion real (ver seek_preview()/
+        # take_preview_snapshot()).
+        self._preview_player = None
+        self._preview_widget = None
+        self._preview_path = None
+        self._preview_warmed_up = False
         self._create_instance(visualizer=False)
 
     def _create_instance(self, visualizer: bool):
@@ -50,6 +59,15 @@ class VLCPlayer:
             self.media_player.set_equalizer(self._equalizer)
         if self._video_widget is not None:
             self._attach_to_widget(self._video_widget)
+        # El reproductor de vista previa (si existia) vivia en la Instance
+        # vieja, ahora liberada junto con ella: se descarta y se recrea
+        # perezosamente (ver _ensure_preview_player) contra la nueva,
+        # reenganchandose al mismo widget invisible si habia uno.
+        self._preview_player = None
+        self._preview_path = None
+        self._preview_warmed_up = False
+        if self._preview_widget is not None:
+            self._attach_preview_widget(self._preview_widget)
 
     # -- salida de video ---------------------------------------------------
     def _attach_to_widget(self, widget):
@@ -104,8 +122,23 @@ class VLCPlayer:
     def is_playing(self) -> bool:
         return self.media_player.is_playing() == 1
 
+    def is_paused(self) -> bool:
+        return self.media_player.get_state() == vlc.State.Paused
+
     def get_state(self):
         return self.media_player.get_state()
+
+    def next_frame(self) -> bool:
+        """Avanza un solo fotograma (libvlc_media_player_next_frame). Solo
+        tiene sentido con el reproductor en pausa: si sigue reproduciendo,
+        el siguiente refresco de video pisa de inmediato el fotograma
+        adelantado, y ademas varios modulos de video de libVLC ignoran la
+        llamada si el estado no es Paused. Devuelve False sin llamar a
+        libVLC si no esta pausado."""
+        if not self.is_paused():
+            return False
+        self.media_player.next_frame()
+        return True
 
     # -- tiempo / posicion ----------------------------------------------------
     def get_length_ms(self) -> int:
@@ -195,6 +228,96 @@ class VLCPlayer:
             return False
         w, h = self.media_player.video_get_size(0)
         return w > 0 and h > 0
+
+    # -- vista previa de la barra de progreso -------------------------------
+    # libVLC no ofrece forma de capturar un fotograma en una posicion dada
+    # sin realmente decodificar hasta ahi: no hay una API de "snapshot en
+    # frio". La unica manera confiable con python-vlc de no interrumpir la
+    # reproduccion real es un segundo vlc.MediaPlayer (misma Instance, mismo
+    # archivo) que se busca y capta por separado; el media_player principal
+    # nunca se toca. Esto sigue implicando una busqueda real (aunque
+    # invisible para el usuario) en ese reproductor secundario.
+    def _ensure_preview_player(self):
+        if self._preview_player is None:
+            self._preview_player = self.instance.media_player_new()
+            self._preview_player.audio_set_mute(True)
+        return self._preview_player
+
+    def _attach_preview_widget(self, widget):
+        player = self._ensure_preview_player()
+        wid = int(widget.winId())
+        if sys.platform.startswith("win"):
+            player.set_hwnd(wid)
+        elif sys.platform.startswith("linux"):
+            player.set_xwindow(wid)
+        elif sys.platform == "darwin":
+            player.set_nsobject(wid)
+
+    def attach_preview_output(self, widget):
+        """Engancha el reproductor de vista previa a un widget que nunca se
+        muestra en pantalla -- solo existe para darle a libVLC una ventana
+        nativa donde crear su salida de video."""
+        self._preview_widget = widget
+        self._attach_preview_widget(widget)
+
+    def preview_current_path(self):
+        return self._preview_path
+
+    def load_preview_media(self, path_or_url: str):
+        """Carga (sin que el usuario la vea ni la oiga -- silenciado en
+        _ensure_preview_player) el archivo actual en el reproductor de
+        vista previa. No hace falta recargar si ya es el mismo archivo
+        (ver preview_current_path).
+
+        Deliberadamente NO se pausa aqui. Se probo contra libVLC real:
+        llamar set_pause(1) inmediatamente despues de play(), antes de que
+        el primer fotograma llegue a la salida de video, deja el vout
+        "vacio" para siempre -- has_vout() e incluso
+        video_take_snapshot() siguen devolviendo exito, pero nunca se
+        escribe ningun archivo, en ningun intento posterior. Se deja
+        reproduciendo (silenciado) hasta que take_preview_snapshot()
+        confirma que ya salio un fotograma real, momento en el que recien
+        es seguro pausarlo (ver ahi)."""
+        player = self._ensure_preview_player()
+        if is_url(path_or_url):
+            media = self.instance.media_new(path_or_url)
+        else:
+            media = self.instance.media_new_path(os.path.normpath(path_or_url))
+        player.set_media(media)
+        player.play()
+        self._preview_path = path_or_url
+        self._preview_warmed_up = False
+
+    def seek_preview(self, position: float):
+        """Busca una posicion (0..1) en el reproductor de vista previa. Es
+        una busqueda real, pero en un reproductor separado e invisible, asi
+        que no afecta la posicion/estado de lo que el usuario esta viendo."""
+        if self._preview_player is None:
+            return
+        self._preview_player.set_position(max(0.0, min(1.0, position)))
+
+    def take_preview_snapshot(self, path: str, width: int = 0, height: int = 0) -> bool:
+        if self._preview_player is None:
+            return False
+        ok = self._preview_player.video_take_snapshot(0, path, width, height) == 0
+        if ok and not self._preview_warmed_up:
+            # Ya salio al menos un fotograma real de la salida de video:
+            # pausar ahora (a diferencia de pausar antes del primer
+            # fotograma, ver load_preview_media) deja el reproductor listo
+            # para seguir sirviendo capturas en futuras busquedas sin
+            # seguir decodificando/gastando CPU de fondo entre un hover y
+            # el siguiente.
+            self._preview_warmed_up = True
+            self._preview_player.set_pause(1)
+        return ok
+
+    def release_preview_player(self):
+        if self._preview_player is not None:
+            self._preview_player.stop()
+            self._preview_player.release()
+            self._preview_player = None
+            self._preview_path = None
+            self._preview_warmed_up = False
 
     # -- ecualizador -------------------------------------------------------
     def equalizer_preset_names(self):

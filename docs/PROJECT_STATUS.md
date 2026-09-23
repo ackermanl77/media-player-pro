@@ -48,6 +48,7 @@ tener VLC instalado.
 | Formatos soportados y helpers puros (tiempo, rutas, filtros de diálogo) | `player/formats.py` |
 | Posiciones de reproducción recordadas entre sesiones | `player/resume.py` |
 | Marcadores nombrados por archivo | `player/bookmarks.py`, `player/bookmarks_dialog.py` |
+| Lista de archivos/URLs abiertos recientemente | `player/recent_files.py` |
 | Configuración persistente del usuario (API keys) | `player/config.py` |
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
@@ -219,6 +220,93 @@ player instalado aparte, igual que al correr desde el código fuente.
   (confirmado en el log: "Copying icon to EXE") y se lanzó el `.exe`
   resultante para confirmar que los assets empaquetados se cargan sin
   error fuera del entorno de desarrollo.
+
+- **Tres funciones nuevas: avance fotograma a fotograma, archivos recientes,
+  y miniatura de vista previa al pasar el mouse por la barra de progreso.**
+  - **Avance fotograma a fotograma**: `VLCPlayer.next_frame()` envuelve
+    `libvlc_media_player_next_frame()`, pero solo actua si
+    `VLCPlayer.is_paused()` (si no, devuelve `False` sin tocar libVLC,
+    porque el siguiente refresco de video pisaria de inmediato el
+    fotograma adelantado). Atajo "." y entrada "Avanzar un fotograma" en
+    el menú Reproducción (`MainWindow.step_frame()`), que muestra un aviso
+    en la barra de estado si se llama sin pausar primero.
+  - **Archivos recientes** (`player/recent_files.py`, mismo patrón que
+    `resume.py`/`bookmarks.py`: JSON puro en
+    `~/.reproductor_multimedia_pro/recent_files.json`): lista de hasta 20
+    rutas/URLs, más reciente primero, reabrir una existente la mueve al
+    frente en vez de duplicarla. `MainWindow` registra cada pista
+    efectivamente reproducida (`play_index()`) y expone un submenú
+    "Archivo → Abrir reciente" (poblado bajo demanda vía `aboutToShow`,
+    mismo patrón que los submenús de pistas de audio/subtítulos) con
+    "Limpiar lista".
+  - **Miniatura de vista previa en la barra de progreso**: al pasar el
+    mouse sobre `PositionSlider` (que ahora emite `hovered`/`hoverEnded`),
+    tras un debounce de 300 ms aparece un popup con un fotograma de esa
+    posición. libVLC no ofrece forma de capturar un fotograma en frío sin
+    decodificar hasta ahí, así que se usa un segundo `vlc.MediaPlayer`
+    (mismo `Instance`, mismo archivo, silenciado y enganchado a un widget
+    invisible fuera de pantalla) enteramente separado del reproductor
+    principal -- la búsqueda real ocurre ahí, nunca en lo que el usuario
+    está viendo/escuchando (`VLCPlayer.load_preview_media()`/
+    `seek_preview()`/`take_preview_snapshot()`). Se encontró (y evitó) un
+    comportamiento real de libVLC probado contra el binario: pausar el
+    reproductor de vista previa inmediatamente después de `play()`, antes
+    de que llegue el primer fotograma a la salida de video, lo deja
+    "vacío" para siempre -- `video_take_snapshot()` sigue devolviendo
+    éxito pero nunca vuelve a escribir un archivo. La solución: se deja
+    reproduciendo (silenciado) hasta que la primera captura efectivamente
+    produce un archivo, y solo entonces se pausa (pausar *después* del
+    primer fotograma sí es seguro y deja capturas siguientes funcionando
+    con el reproductor en pausa, sin seguir gastando CPU de fondo).
+  - `tests/test_backend.py` (3 pruebas nuevas) cubre `next_frame()`/
+    `is_paused()`; `tests/test_preview_thumbnail.py` (6 pruebas) cubre el
+    reproductor de vista previa reutilizando el mismo truco que
+    `test_visualizer.py` (visualizador de espectro sobre un WAV) para
+    tener salida de video real y verificable sin un archivo de video de
+    verdad; `tests/test_recent_files.py` (10 pruebas) cubre
+    `recent_files.py` sin VLC/Qt; `tests/test_app_smoke.py` gana 6 pruebas
+    de humo para el cableado de las tres funciones en `MainWindow`. Las
+    interacciones reales de mouse (hover) y teclado no se pueden ejercitar
+    con la plataforma Qt "offscreen" (igual que el resto de
+    `components`/interacciones de mouse del proyecto): se verifican
+    llamando directamente a los métodos internos que esa interacción real
+    termina invocando (`_on_slider_hovered`, `step_frame`, etc.), no
+    simulando el movimiento del mouse en sí.
+
+- **Pasada de revisión de UI**, tras una revisión enfocada en feedback
+  visual y en el uso del mouse en pantalla completa. Tres arreglos:
+  - **OSD (overlay en pantalla) reutilizable**: un `QLabel` semitransparente
+    flotando sobre `video_frame` (`_show_osd()` en `main_window.py`), con un
+    único `QTimer` de ~1.5s que lo oculta. Cableado a los tres sitios que
+    antes no daban ninguna señal visual de éxito: `step_frame()`
+    ("Fotograma siguiente"), `_seek_relative()` ("+5s"/"-5s") y
+    `_nudge_volume()` ("Volumen: NN%").
+  - **Controles flotantes en pantalla completa**: en vez de que
+    `toggle_fullscreen()` oculte `controls_bar` por completo, ahora la
+    reparenta como overlay sobre `video_frame` (`_float_controls_bar()`/
+    `_unfloat_controls_bar()`, reutilizando los mismos widgets en vez de
+    duplicar cada botón) y la muestra/oculta según actividad de mouse: un
+    filtro de eventos a nivel de aplicación (`eventFilter()`, instalado en
+    `__init__` y removido en `closeEvent`) detecta `QEvent.MouseMove` en
+    cualquier widget mientras la ventana está en pantalla completa y
+    reinicia un `QTimer` de inactividad de ~2.5s (`_fullscreen_idle_timer`)
+    que la vuelve a ocultar.
+  - **Timestamp en la miniatura de vista previa**: el popup de
+    `_show_hover_preview()` pasó de ser un solo `QLabel` con el pixmap a un
+    `QWidget` con un `QVBoxLayout` que agrega un segundo `QLabel` debajo,
+    con `format_time()` sobre la posición (fracción × duración) que
+    representa el punto bajo el mouse — antes solo se veía el fotograma,
+    sin saber a qué instante correspondía.
+  - `tests/test_app_smoke.py` gana 12 pruebas nuevas. Igual que con la
+    vista previa, la interacción real de mouse en pantalla completa no se
+    puede ejercitar con la plataforma "offscreen": se verifica llamando
+    directamente a los métodos de estado (`_on_fullscreen_mouse_activity`,
+    `_show_floating_controls`/`_hide_floating_controls`, `eventFilter()`
+    con un `QEvent.MouseMove` sintético) en vez de simular el movimiento en
+    sí. Las pruebas de visibilidad del OSD/controles usan `isHidden()` en
+    vez de `isVisible()`, porque la ventana nunca se muestra en estas
+    pruebas y `isVisible()` de un widget hijo depende de la visibilidad de
+    sus ancestros, no solo de su propio último `show()`/`hide()`.
 
 ## Verification
 

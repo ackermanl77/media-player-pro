@@ -15,6 +15,7 @@ except OSError:
 
 from PySide6.QtWidgets import QApplication
 
+from player import main_window as main_window_module
 from player.main_window import MainWindow
 
 
@@ -53,5 +54,260 @@ def test_equalizer_dialog_builds_without_error(qapp):
     try:
         window.open_equalizer()
         assert window.equalizer_dialog is not None
+    finally:
+        window.close()
+
+
+def test_step_frame_shows_a_hint_when_nothing_is_playing(qapp):
+    # Sin nada cargado (current_index == -1) no debe tocar libVLC ni fallar.
+    window = MainWindow()
+    try:
+        window.step_frame()
+    finally:
+        window.close()
+
+
+def test_step_frame_is_a_no_op_and_shows_a_hint_when_not_paused(qapp):
+    window = MainWindow()
+    try:
+        window.add_files_to_playlist(["C:/fake/song.mp3"])
+        window.current_index = 0  # simula una pista "actual" sin reproducirla de verdad
+        window.step_frame()
+        assert "pausa" in window.statusBar().currentMessage().lower()
+    finally:
+        window.close()
+
+
+def test_recent_files_menu_populates_and_offers_a_clear_action(qapp, monkeypatch, tmp_path):
+    from player import recent_files as recent_files_module
+
+    monkeypatch.setattr(recent_files_module.Path, "home", staticmethod(lambda: tmp_path))
+    window = MainWindow()
+    try:
+        # Vacia: un solo item deshabilitado, ningun "Limpiar lista".
+        window._populate_recent_files_menu()
+        actions = window.menu_recent_files.actions()
+        assert len(actions) == 1
+        assert not actions[0].isEnabled()
+
+        recent_files_module.add_recent_file("C:/fake/song.mp3")
+        recent_files_module.add_recent_file("https://example.com/stream.mp3")
+        window._populate_recent_files_menu()
+        actions = window.menu_recent_files.actions()
+        # 2 archivos + separador + "Limpiar lista"
+        labels = [a.text() for a in actions if not a.isSeparator()]
+        assert any("song.mp3" in label for label in labels)
+        assert any("example.com" in label for label in labels)
+        assert "Limpiar lista" in labels
+    finally:
+        window.close()
+
+
+def test_open_recent_file_warns_about_a_missing_local_file(qapp, monkeypatch, tmp_path):
+    from player import recent_files as recent_files_module
+
+    monkeypatch.setattr(recent_files_module.Path, "home", staticmethod(lambda: tmp_path))
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(main_window_module.QMessageBox, "warning", lambda *a, **k: None)
+        window.open_recent_file("C:/definitely/not/a/real/file.mp4")
+        # No debe haberse agregado a la playlist ni intentado reproducir.
+        assert window.playlist_widget.count() == 0
+        assert window.current_index == -1
+    finally:
+        window.close()
+
+
+def test_hover_preview_wiring_does_not_crash_without_a_loaded_track(qapp):
+    from PySide6.QtCore import QPoint
+
+    window = MainWindow()
+    try:
+        # Sin pista actual, el hover debe ser un no-op silencioso.
+        window._on_slider_hovered(0.5, QPoint(100, 100))
+        assert not window._preview_hover_timer.isActive()
+        window._on_slider_hover_ended()
+    finally:
+        window.close()
+
+
+def test_hover_preview_debounce_timer_starts_once_a_track_is_current(qapp):
+    from PySide6.QtCore import QPoint
+
+    window = MainWindow()
+    try:
+        window.add_files_to_playlist(["C:/fake/song.mp3"])
+        window.current_index = 0
+        # Simula que ya hay un largo conocido, como update_ui() lo haria.
+        monkeypatch_length = window.player.get_length_ms
+        window.player.get_length_ms = lambda: 60000
+        try:
+            window._on_slider_hovered(0.3, QPoint(50, 50))
+            assert window._preview_hover_timer.isActive()
+            assert window._pending_hover_fraction == 0.3
+        finally:
+            window.player.get_length_ms = monkeypatch_length
+        window._on_slider_hover_ended()
+        assert not window._preview_hover_timer.isActive()
+    finally:
+        window.close()
+
+
+def test_hover_preview_popup_shows_a_formatted_timestamp(qapp):
+    from PySide6.QtCore import QPoint
+
+    from player.formats import format_time
+
+    window = MainWindow()
+    try:
+        window.add_files_to_playlist(["C:/fake/song.mp3"])
+        window.current_index = 0
+        window.player.get_length_ms = lambda: 60000
+        window._pending_hover_fraction = 0.5
+        window._pending_hover_pos = QPoint(100, 100)
+        window._show_hover_preview()
+        try:
+            assert window._preview_popup is not None
+            assert window._preview_popup.isVisible()
+            assert window._preview_time_label.text() == format_time(30000)
+        finally:
+            window._hide_hover_preview()
+    finally:
+        window.close()
+
+
+# ------------------------------------------------------------------ OSD
+def test_show_osd_displays_text_and_hides_after_the_timer_fires(qapp):
+    # La ventana nunca se muestra en estas pruebas (plataforma "offscreen"),
+    # asi que isVisible() del label dependeria de la visibilidad del propio
+    # QMainWindow; isHidden() en cambio refleja el ultimo show()/hide()
+    # explicito del widget, que es lo que _show_osd/el timer controlan.
+    window = MainWindow()
+    try:
+        window._show_osd("+5s")
+        assert not window._osd_label.isHidden()
+        assert window._osd_label.text() == "+5s"
+        assert window._osd_timer.isActive()
+
+        # Simula el disparo del timer sin esperar 1.5s reales.
+        window._osd_timer.timeout.emit()
+        assert window._osd_label.isHidden()
+    finally:
+        window.close()
+
+
+def test_seek_relative_shows_signed_seconds_on_the_osd(qapp):
+    window = MainWindow()
+    try:
+        window.add_files_to_playlist(["C:/fake/song.mp3"])
+        window.current_index = 0
+        window._seek_relative(5000)
+        assert window._osd_label.text() == "+5s"
+        window._seek_relative(-5000)
+        assert window._osd_label.text() == "-5s"
+    finally:
+        window.close()
+
+
+def test_seek_relative_without_a_current_track_does_not_touch_the_osd(qapp):
+    window = MainWindow()
+    try:
+        window._osd_label.hide()
+        window._seek_relative(5000)
+        assert window._osd_label.isHidden()
+    finally:
+        window.close()
+
+
+def test_nudge_volume_shows_the_resulting_percentage_on_the_osd(qapp):
+    window = MainWindow()
+    try:
+        window.volume_slider.setValue(80)
+        window._nudge_volume(5)
+        assert window._osd_label.text() == "Volumen: 85%"
+        assert window.volume_slider.value() == 85
+    finally:
+        window.close()
+
+
+def test_step_frame_shows_osd_on_a_successful_frame_advance(qapp):
+    window = MainWindow()
+    try:
+        window.add_files_to_playlist(["C:/fake/song.mp3"])
+        window.current_index = 0
+        # No hay media real cargada; se simula el estado en pausa y un
+        # avance exitoso para probar el cableado de step_frame -> OSD sin
+        # depender de decodificar un archivo de verdad.
+        window.player.is_paused = lambda: True
+        window.player.next_frame = lambda: True
+        window.step_frame()
+        assert not window._osd_label.isHidden()
+        assert window._osd_label.text() == "Fotograma siguiente"
+    finally:
+        window.close()
+
+
+# ---------------------------------------------------- fullscreen controls
+def test_toggle_fullscreen_floats_controls_bar_onto_the_video_frame(qapp):
+    window = MainWindow()
+    try:
+        assert window.controls_bar.parent() is not window.video_frame
+        window.toggle_fullscreen()
+        try:
+            assert window.controls_bar.parent() is window.video_frame
+            assert window.controls_bar.isVisible()
+            assert window._fullscreen_idle_timer.isActive()
+        finally:
+            window._exit_fullscreen()
+        assert window.controls_bar.parent() is not window.video_frame
+        assert not window._fullscreen_idle_timer.isActive()
+    finally:
+        window.close()
+
+
+def test_fullscreen_idle_timeout_hides_the_floating_controls_bar(qapp):
+    window = MainWindow()
+    try:
+        window.toggle_fullscreen()
+        try:
+            assert window.controls_bar.isVisible()
+            window._fullscreen_idle_timer.timeout.emit()
+            assert not window.controls_bar.isVisible()
+            # Nueva actividad de mouse vuelve a mostrarla.
+            window._on_fullscreen_mouse_activity()
+            assert window.controls_bar.isVisible()
+        finally:
+            window._exit_fullscreen()
+    finally:
+        window.close()
+
+
+def test_fullscreen_mouse_activity_is_a_no_op_outside_fullscreen(qapp):
+    window = MainWindow()
+    try:
+        window._on_fullscreen_mouse_activity()
+        assert not window._fullscreen_idle_timer.isActive()
+    finally:
+        window.close()
+
+
+def test_event_filter_only_reacts_to_mouse_move_while_fullscreen(qapp):
+    from PySide6.QtCore import QEvent
+
+    window = MainWindow()
+    try:
+        move_event = QEvent(QEvent.Type.MouseMove)
+        window.eventFilter(window.video_frame, move_event)
+        assert not window._fullscreen_idle_timer.isActive()
+
+        window.toggle_fullscreen()
+        try:
+            window._hide_floating_controls()
+            assert not window.controls_bar.isVisible()
+            move_event2 = QEvent(QEvent.Type.MouseMove)
+            window.eventFilter(window.video_frame, move_event2)
+            assert window.controls_bar.isVisible()
+        finally:
+            window._exit_fullscreen()
     finally:
         window.close()

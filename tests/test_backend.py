@@ -51,3 +51,62 @@ def test_load_plays_a_path_that_uses_forward_slashes(tmp_path):
         assert _wait_until(lambda: player.get_state() in (vlc.State.Playing, vlc.State.Ended))
     finally:
         player.stop()
+
+
+def _make_silent_wav(path, duration_s: float = 3.0):
+    import wave
+
+    with wave.open(str(path), "w") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(8000)
+        f.writeframes(b"\x00\x00" * int(8000 * duration_s))
+
+
+def test_next_frame_is_a_no_op_while_playing(tmp_path):
+    # is_paused()/next_frame() son parte del wrapper de Python, no de
+    # libVLC: se prueba la logica de "solo tiene sentido en pausa" contra un
+    # archivo real, sin depender de si el backend de video reporta
+    # fotogramas para audio puro.
+    wav_path = tmp_path / "silence.wav"
+    _make_silent_wav(wav_path)
+
+    player = VLCPlayer()
+    player.instance = vlc.Instance(["--aout=adummy", "--quiet"])
+    player.media_player = player.instance.media_player_new()
+
+    player.load(str(wav_path))
+    player.play()
+    try:
+        assert _wait_until(lambda: player.get_state() in (vlc.State.Playing, vlc.State.Ended))
+        assert player.is_paused() is False
+        assert player.next_frame() is False
+    finally:
+        player.stop()
+
+
+def test_next_frame_returns_true_and_calls_libvlc_once_paused(tmp_path):
+    wav_path = tmp_path / "silence.wav"
+    _make_silent_wav(wav_path)
+
+    player = VLCPlayer()
+    player.instance = vlc.Instance(["--aout=adummy", "--quiet"])
+    player.media_player = player.instance.media_player_new()
+
+    player.load(str(wav_path))
+    player.play()
+    try:
+        assert _wait_until(lambda: player.get_state() == vlc.State.Playing)
+        player.set_paused(True)
+        assert _wait_until(player.is_paused)
+        assert player.next_frame() is True
+    finally:
+        player.stop()
+
+
+def test_is_paused_is_false_before_anything_plays():
+    player = VLCPlayer()
+    player.instance = vlc.Instance(["--aout=adummy", "--quiet"])
+    player.media_player = player.instance.media_player_new()
+    assert player.is_paused() is False
+    assert player.next_frame() is False
