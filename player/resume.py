@@ -1,8 +1,10 @@
 """Recuerda la posicion de reproduccion de cada archivo local entre sesiones,
 al estilo BS.Player. No depende de VLC ni de Qt."""
 
-import json
 from pathlib import Path
+
+from .formats import path_key
+from .jsonstore import load_json, save_json
 
 # Por debajo de esto, no vale la pena "reanudar" -- prácticamente el inicio.
 RESUME_THRESHOLD_START_MS = 3_000
@@ -12,29 +14,39 @@ RESUME_THRESHOLD_START_MS = 3_000
 # antes del final.
 RESUME_THRESHOLD_END_FRACTION = 0.97
 
+# Tope de archivos recordados: sin el, positions.json crece para siempre
+# (una entrada por cada archivo alguna vez abierto a medias). Se descartan
+# los guardados hace mas tiempo.
+MAX_SAVED_POSITIONS = 1000
+
 
 def positions_file() -> Path:
     return Path.home() / ".reproductor_multimedia_pro" / "positions.json"
 
 
 def _load_all() -> dict:
-    path = positions_file()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    """{clave -> ms}, en orden de guardado (el mas reciente al final).
+    Descarta entradas con tipos invalidos y migra claves viejas (guardadas
+    con la ruta tal cual llegaba, antes de path_key()) a su forma
+    normalizada."""
+    raw = load_json(positions_file(), dict, {})
+    data = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool):
+            data[path_key(key)] = value
+    return data
 
 
 def _save_all(data: dict) -> None:
-    path = positions_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
+    overflow = len(data) - MAX_SAVED_POSITIONS
+    if overflow > 0:
+        for key in list(data)[:overflow]:
+            del data[key]
+    save_json(positions_file(), data)
 
 
 def get_saved_position_ms(path: str):
-    return _load_all().get(path)
+    return _load_all().get(path_key(path))
 
 
 def save_position(path: str, position_ms: int, length_ms: int) -> None:
@@ -44,12 +56,15 @@ def save_position(path: str, position_ms: int, length_ms: int) -> None:
         clear_position(path)
         return
     data = _load_all()
-    data[path] = position_ms
+    key = path_key(path)
+    data.pop(key, None)  # re-insertar al final: pasa a ser la mas reciente
+    data[key] = int(position_ms)
     _save_all(data)
 
 
 def clear_position(path: str) -> None:
     data = _load_all()
-    if path in data:
-        del data[path]
+    key = path_key(path)
+    if key in data:
+        del data[key]
         _save_all(data)

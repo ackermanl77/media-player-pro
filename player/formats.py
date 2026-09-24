@@ -1,6 +1,9 @@
 """Extensiones de audio/video soportadas (todo lo que libVLC es capaz de decodificar)."""
 
 import os
+import re
+import urllib.parse
+import urllib.request
 
 AUDIO_EXTS = {
     ".mp3", ".wav", ".flac", ".aac", ".ogg", ".oga", ".m4a", ".wma", ".opus",
@@ -23,6 +26,53 @@ STREAM_SCHEMES = ("http://", "https://", "rtsp://", "rtmp://", "rtmpe://", "mms:
 
 def is_url(path: str) -> bool:
     return path.lower().startswith(STREAM_SCHEMES)
+
+
+# Cualquier "esquema://" de 2+ letras (http, ftp, dvd, smb...). Exige al
+# menos dos letras para no confundir una letra de unidad ("C:\...") con un
+# esquema de URL.
+_URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]+://")
+
+
+def has_uri_scheme(path: str) -> bool:
+    return bool(_URI_SCHEME_RE.match(path))
+
+
+def file_uri_to_path(uri: str) -> str:
+    r"""Convierte "file:///C:/Musica/a%20b.mp3" en "C:\Musica\a b.mp3" (o
+    "/home/x/a b.mp3" fuera de Windows). Un host distinto de localhost se
+    trata como ruta UNC ("file://servidor/share/x" -> "\\servidor\share\x")."""
+    parsed = urllib.parse.urlparse(uri)
+    local = urllib.request.url2pathname(parsed.path)
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        local = os.sep * 2 + parsed.netloc + os.sep + local.lstrip("\\/")
+    return local
+
+
+def normalize_path(path: str) -> str:
+    r"""Forma canonica de una entrada de la playlist: las rutas locales pasan
+    a absolutas con separadores nativos (QFileDialog da "C:/...", open_folder
+    mezclaba "C:/dir\sub\f.mkv", la linea de comandos da "C:\..." o rutas
+    relativas); un "file://" se convierte en ruta local; cualquier otra URL
+    se deja intacta. Conserva mayusculas/minusculas (es lo que se muestra al
+    usuario) -- para comparar/usar como clave, ver path_key()."""
+    if path.lower().startswith("file:"):
+        path = file_uri_to_path(path)
+    elif has_uri_scheme(path):
+        return path
+    return os.path.abspath(path)
+
+
+def path_key(path: str) -> str:
+    r"""Clave estable para guardar datos por archivo (posiciones, marcadores,
+    recientes): normalize_path() + os.path.normcase(), asi "C:/X/a.mkv",
+    "c:\x\A.MKV" y "C:\X\a.mkv" son el mismo archivo en Windows (en Linux
+    normcase no toca nada, igual que el sistema de archivos). Las URLs se
+    devuelven sin cambios."""
+    normalized = normalize_path(path)
+    if has_uri_scheme(normalized):
+        return normalized
+    return os.path.normcase(normalized)
 
 
 def is_audio_file(path: str) -> bool:
