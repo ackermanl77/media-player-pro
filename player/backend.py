@@ -3,6 +3,7 @@ para maxima calidad y compatibilidad de formatos, aceleracion por hardware cuand
 el driver de video la soporta."""
 
 import os
+import pathlib
 import sys
 
 import vlc
@@ -33,6 +34,20 @@ class VLCPlayer:
         self._visualizer_on = False
         self._subtitle_scale = DEFAULT_SUBTITLE_SCALE
         self._instance_subtitle_scale = DEFAULT_SUBTITLE_SCALE
+        self._video_scale = 0.0  # 0 = ajustar a ventana (default de libVLC)
+        self.instance = None
+        self.media_player = None
+        # Ruta/URL cargada con load() y subtitulos externos agregados sobre
+        # ella: hacen falta para recargar el mismo archivo al recrear el
+        # Instance (ver reload_preserving_state).
+        self._current_path = None
+        self._external_subtitles = []
+        self._pending_restore = None
+        # Lo pone en True el evento MediaPlayerEncounteredError (hilo de
+        # libVLC): en libVLC 3 un archivo inexistente dispara el evento pero
+        # get_state() termina en Ended, no en Error (ver
+        # playlist_order.playback_failed).
+        self._error_seen = False
         # Reproductor secundario, invisible, dedicado solo a generar
         # miniaturas de vista previa al pasar el mouse por la barra de
         # progreso -- separado del media_player principal para no
@@ -44,11 +59,38 @@ class VLCPlayer:
         self._preview_warmed_up = False
         self._create_instance(visualizer=False)
 
+    def _release_instance(self):
+        """Libera explicitamente los objetos de libVLC actuales. Reemplazar
+        las referencias de Python no alcanza: python-vlc no llama release()
+        al recolectarlas, asi que cada recreacion (cambiar entre audio y
+        video con el visualizador, cambiar el tamano de subtitulos) dejaba
+        un MediaPlayer + Instance completos (hilos, vout, decodificadores)
+        vivos hasta cerrar la app -- y el reproductor de vista previa
+        seguia decodificando el archivo viejo."""
+        if self._preview_player is not None:
+            self._preview_player.stop()
+            self._preview_player.release()
+            self._preview_player = None
+        if self.media_player is not None:
+            self.media_player.stop()
+            self.media_player.release()
+            self.media_player = None
+        if self.instance is not None:
+            self.instance.release()
+            self.instance = None
+
+    def _on_vlc_error(self, _event):
+        self._error_seen = True
+
     def _create_instance(self, visualizer: bool):
+        self._release_instance()
         args = BASE_VLC_ARGS + (VISUALIZER_VLC_ARGS if visualizer else [])
         args = args + [f"--sub-text-scale={self._subtitle_scale}"]
         self.instance = vlc.Instance(args)
         self.media_player = self.instance.media_player_new()
+        self.media_player.event_manager().event_attach(
+            vlc.EventType.MediaPlayerEncounteredError, self._on_vlc_error
+        )
         self._visualizer_on = visualizer
         self._instance_subtitle_scale = self._subtitle_scale
 
@@ -57,13 +99,16 @@ class VLCPlayer:
         self.media_player.set_rate(self._rate)
         if self._equalizer is not None:
             self.media_player.set_equalizer(self._equalizer)
+        # El zoom es estado del MediaPlayer (no del Media): sin esto, se
+        # perdia en silencio al recrear -- el menu seguia marcando "200%"
+        # mientras el video volvia a "ajustar a ventana".
+        self.media_player.video_set_scale(self._video_scale)
         if self._video_widget is not None:
             self._attach_to_widget(self._video_widget)
         # El reproductor de vista previa (si existia) vivia en la Instance
-        # vieja, ahora liberada junto con ella: se descarta y se recrea
+        # vieja y se libero con ella (_release_instance): se recrea
         # perezosamente (ver _ensure_preview_player) contra la nueva,
         # reenganchandose al mismo widget invisible si habia uno.
-        self._preview_player = None
         self._preview_path = None
         self._preview_warmed_up = False
         if self._preview_widget is not None:
@@ -92,20 +137,118 @@ class VLCPlayer:
         # Instance (ver VISUALIZER_VLC_ARGS).
         want_visualizer = enable_visualizer and is_audio_file(path_or_url)
         if want_visualizer != self._visualizer_on or self._subtitle_scale != self._instance_subtitle_scale:
-            self.media_player.stop()
             self._create_instance(visualizer=want_visualizer)
 
-        if is_url(path_or_url):
-            media = self.instance.media_new(path_or_url)
-        else:
-            # libvlc_media_new_path falla silenciosamente en Windows con
-            # rutas que usan "/" (el reproductor se queda en
-            # State.NothingSpecial para siempre, sin pasar nunca a
-            # State.Error): normalizar a "\" antes de pasarlo. Rutas asi
-            # llegan tipicamente por argumentos de linea de comandos.
-            media = self.instance.media_new_path(os.path.normpath(path_or_url))
+        media = self._new_media(path_or_url)
         self.media_player.set_media(media)
+        self._current_path = path_or_url
+        self._external_subtitles = []
+        self._pending_restore = None
+        self._error_seen = False
         return media
+
+    def _new_media(self, path_or_url: str):
+        if is_url(path_or_url):
+            return self.instance.media_new(path_or_url)
+        # libvlc_media_new_path falla silenciosamente en Windows con
+        # rutas que usan "/" (el reproductor se queda en
+        # State.NothingSpecial para siempre, sin pasar nunca a
+        # State.Error): normalizar a "\" antes de pasarlo. Rutas asi
+        # llegan tipicamente por argumentos de linea de comandos.
+        return self.instance.media_new_path(os.path.normpath(path_or_url))
+
+    def reload_preserving_state(self) -> bool:
+        """Recrea el Instance (para aplicar opciones de instancia como
+        --sub-text-scale) y recarga el mismo archivo SIN pasar por el flujo
+        de "abrir pista" de la UI: conserva posicion, pausa, pista de audio,
+        pista de subtitulos, subtitulos externos cargados y desfase de
+        subtitulos. Devuelve False (sin hacer nada) si no hay nada
+        reproduciendose/en pausa -- en ese caso la proxima load() ya recrea
+        el Instance por su cuenta.
+
+        Verificado contra libVLC 3.0.23: la posicion, la pista de audio, la
+        de subtitulos y los subtitulos externos se pueden fijar como
+        opciones del Media antes de play(); el desfase de subtitulos no (y
+        se resetea a 0 con cada Media nuevo), asi que ese -- y deshabilitar
+        pistas (id -1), que no tiene opcion equivalente -- se reaplica en
+        apply_pending_restore() una vez que el nuevo input esta en Playing."""
+        state = self.get_state()
+        if self._current_path is None or state not in (vlc.State.Playing, vlc.State.Paused):
+            return False
+        snapshot = {
+            "time_ms": self.get_time_ms(),
+            "paused": state == vlc.State.Paused,
+            "audio_track": self.get_current_audio_track(),
+            "subtitle_track": self.get_current_subtitle_track(),
+            "subtitle_delay_ms": self.get_subtitle_delay_ms(),
+        }
+        external_subtitles = list(self._external_subtitles)
+        path = self._current_path
+
+        self._create_instance(visualizer=self._visualizer_on)
+        media = self._new_media(path)
+        if snapshot["time_ms"] > 0:
+            media.add_option(f":start-time={snapshot['time_ms'] / 1000:.3f}")
+        if snapshot["audio_track"] >= 0:
+            media.add_option(f":audio-track-id={snapshot['audio_track']}")
+        if snapshot["subtitle_track"] >= 0:
+            media.add_option(f":sub-track-id={snapshot['subtitle_track']}")
+        for sub in external_subtitles:
+            media.slaves_add(vlc.MediaSlaveType.subtitle, 4, pathlib.Path(sub).absolute().as_uri())
+        self.media_player.set_media(media)
+        self._external_subtitles = external_subtitles
+        self._error_seen = False
+        self._pending_restore = snapshot
+        self.media_player.play()
+        return True
+
+    def apply_pending_restore(self) -> bool:
+        """Termina lo que reload_preserving_state() no puede fijar antes de
+        play(). Se llama desde el tick de la UI; no hace nada hasta que el
+        input nuevo llega a Playing. Devuelve True cuando lo aplico."""
+        if self._pending_restore is None:
+            return False
+        state = self.get_state()
+        if state in (vlc.State.Ended, vlc.State.Error, vlc.State.Stopped):
+            self._pending_restore = None
+            return False
+        if state != vlc.State.Playing:
+            return False
+        self._pending_restore["waits"] = self._pending_restore.get("waits", 0) + 1
+        if (
+            self._pending_restore["time_ms"] > 0
+            and self.get_time_ms() <= 0
+            and self._pending_restore["waits"] <= 20  # ~5 s de ticks de la UI
+        ):
+            # Verificado contra libVLC 3.0.23: pausar apenas llega a Playing,
+            # antes de que el :start-time se haga efectivo, deja el tiempo
+            # clavado en 0 aunque se reanude despues. Esperar al proximo tick.
+            return False
+        snapshot, self._pending_restore = self._pending_restore, None
+        if snapshot["subtitle_delay_ms"]:
+            self.set_subtitle_delay_ms(snapshot["subtitle_delay_ms"])
+        if snapshot["audio_track"] < 0:
+            self.set_audio_track(-1)
+        if snapshot["subtitle_track"] != self.get_current_subtitle_track():
+            self.set_subtitle_track(snapshot["subtitle_track"])
+        if snapshot["paused"]:
+            self.set_paused(True)
+        return True
+
+    def current_path(self):
+        return self._current_path
+
+    def error_seen(self) -> bool:
+        return self._error_seen
+
+    def is_idle(self) -> bool:
+        """True si no hay nada en curso que pausar/reanudar: nunca se
+        reprodujo, se detuvo, termino o fallo. En esos estados
+        libvlc_media_player_pause() es un no-op (verificado contra libVLC
+        3.0.23), asi que Reproducir/Pausa tiene que volver a llamar play()."""
+        return self.get_state() in (
+            vlc.State.NothingSpecial, vlc.State.Stopped, vlc.State.Ended, vlc.State.Error,
+        )
 
     def play(self):
         self.media_player.play()
@@ -199,6 +342,8 @@ class VLCPlayer:
 
     def load_subtitle_file(self, path: str):
         self.media_player.video_set_subtitle_file(path)
+        if path not in self._external_subtitles:
+            self._external_subtitles.append(path)
 
     def get_subtitle_delay_ms(self) -> int:
         return self.media_player.video_get_spu_delay() // 1000
@@ -215,7 +360,11 @@ class VLCPlayer:
 
     # -- video -------------------------------------------------------------
     def set_video_scale(self, factor: float):
+        self._video_scale = factor
         self.media_player.video_set_scale(factor)
+
+    def get_video_scale(self) -> float:
+        return self._video_scale
 
     def take_snapshot(self, path: str, width: int = 0, height: int = 0):
         self.media_player.video_take_snapshot(0, path, width, height)
@@ -310,6 +459,20 @@ class VLCPlayer:
             self._preview_warmed_up = True
             self._preview_player.set_pause(1)
         return ok
+
+    def stop_preview(self):
+        """Detiene (sin liberar) el reproductor de vista previa y olvida el
+        archivo cargado, para que no siga decodificando en segundo plano
+        (p. ej. si el mouse salio de la barra antes de la primera captura,
+        momento en que todavia no se pudo pausar -- ver load_preview_media)
+        ni retenga abierto un archivo que ya no es el actual."""
+        if self._preview_player is not None:
+            self._preview_player.stop()
+        self._preview_path = None
+        self._preview_warmed_up = False
+
+    def is_preview_warmed_up(self) -> bool:
+        return self._preview_warmed_up
 
     def release_preview_player(self):
         if self._preview_player is not None:
