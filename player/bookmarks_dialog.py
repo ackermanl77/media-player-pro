@@ -1,5 +1,6 @@
 """Dialogo de marcadores nombrados por archivo (BS.Player-style)."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -16,6 +17,10 @@ from .formats import format_time
 
 
 class BookmarksDialog(QDialog):
+    # Se emite tras agregar/renombrar/eliminar: MainWindow cachea los
+    # marcadores de la pista actual para la barra de progreso.
+    bookmarks_changed = Signal()
+
     def __init__(self, player, video_path: str, parent=None):
         super().__init__(parent)
         self.player = player
@@ -67,6 +72,7 @@ class BookmarksDialog(QDialog):
         if ok and name.strip():
             add_bookmark(self.video_path, name.strip(), position_ms)
             self._reload()
+            self.bookmarks_changed.emit()
 
     def _go_to_selected(self):
         row = self.list_widget.currentRow()
@@ -83,6 +89,7 @@ class BookmarksDialog(QDialog):
         if ok and new_name.strip():
             rename_bookmark(self.video_path, row, new_name.strip())
             self._reload()
+            self.bookmarks_changed.emit()
 
     def _remove_selected(self):
         row = self.list_widget.currentRow()
@@ -93,3 +100,4 @@ class BookmarksDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             remove_bookmark(self.video_path, row)
             self._reload()
+            self.bookmarks_changed.emit()

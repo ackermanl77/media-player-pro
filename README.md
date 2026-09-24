@@ -45,9 +45,13 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   múltiples embebidas (típico de MKV).
 - Reproducción de streams de red: HTTP(S), RTSP, RTMP, MMS, UDP.
 - Lista de reproducción con arrastrar y soltar (archivos o carpetas completas),
-  guardar/cargar como `.m3u`.
+  guardar/cargar como `.m3u` (rutas relativas a la carpeta de la lista,
+  UTF-8 o ANSI/cp1252, `file:///`). Selección múltiple para quitar varios.
 - Control de posición, volumen (hasta 150 %), mute, velocidad de reproducción
-  (0.5x–2x), aleatorio y repetir (ninguno/todo/uno).
+  (0.5x–2x), aleatorio (cada pista una vez por vuelta; "Anterior" sigue el
+  historial real) y repetir (ninguno/todo/uno). Un archivo que no se puede
+  reproducir se salta (también con Repetir uno); tras una vuelta completa
+  sin nada reproducible, se detiene.
 - Selección de pista de audio y de subtítulos, carga de subtítulos externos
   (`.srt`, `.ass`, `.ssa`, `.sub`, `.vtt`).
 - Ecualizador gráfico de 10 bandas con presets de VLC (Clásica, Rock, Pop, ...).
@@ -55,7 +59,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - Pantalla completa (doble clic sobre el video o tecla `F`).
 - **Recuerda la posición de reproducción** de cada archivo local entre
   sesiones (al estilo BS.Player): reabrir un video/audio ya visto retoma
-  donde quedó.
+  donde quedó (también al pulsar Detener o quitarlo de la lista).
+  Reproducir tras Detener o tras terminar la lista vuelve a arrancar la
+  pista actual.
 - **Repetición A-B**: marca un punto A y un punto B para poner en bucle
   solo ese tramo.
 - **Sincronía de subtítulos** ajustable en vivo (±50 ms, tecla `G`/`H`) y
@@ -87,7 +93,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 | Ctrl+Flecha der. | Siguiente pista            |
 | Ctrl+Flecha izq. | Pista anterior             |
 | Flecha der./izq. | Adelantar/retroceder 5 s   |
-| Flecha arr./abajo| Subir/bajar volumen        |
+| Flecha arr./abajo| Subir/bajar volumen (con la lista enfocada: moverse por la lista) |
+| Enter (en la lista) | Reproducir el elemento  |
+| Supr (en la lista)  | Quitar los seleccionados |
 | M                | Silenciar                  |
 | G                | Adelantar subtítulos 50 ms |
 | H                | Retrasar subtítulos 50 ms  |

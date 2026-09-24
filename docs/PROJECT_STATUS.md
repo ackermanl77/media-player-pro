@@ -49,6 +49,9 @@ tener VLC instalado.
 | Posiciones de reproducción recordadas entre sesiones | `player/resume.py` |
 | Marcadores nombrados por archivo | `player/bookmarks.py`, `player/bookmarks_dialog.py` |
 | Lista de archivos/URLs abiertos recientemente | `player/recent_files.py` |
+| Orden de reproducción (secuencial/aleatorio) y detección de fallo | `player/playlist_order.py` |
+| Lectura/escritura de `.m3u` | `player/m3u.py` |
+| JSON atómico con `.bak` para el estado del usuario | `player/jsonstore.py` |
 | Configuración persistente del usuario (API keys) | `player/config.py` |
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
@@ -340,6 +343,37 @@ creciendo.
   tiempo de ejecución.
 
 ## Recently Fixed
+
+- **Tanda de 10 bugs de transporte/playlist/persistencia (revisión contra
+  libVLC 3.0.23).** (1) Reproducir tras Detener o fin de lista no hacía
+  nada (`pause()` es no-op en Stopped/Ended): ahora rearranca la pista
+  actual (`VLCPlayer.is_idle()`). (2) Un archivo roto con Repetir: Uno se
+  recargaba cada 250 ms para siempre — y **en libVLC 3.0.23 un archivo
+  inexistente o corrupto termina en `State.Ended`, no en `State.Error`**,
+  así que la rama de error casi nunca corría: se detecta con
+  `playlist_order.playback_failed()` (evento `MediaPlayerEncounteredError`
+  o Ended sin largo ni avance), se ignora Repetir: Uno y se detiene tras
+  una vuelta de fallos seguidos. (3) Aleatorio muestreaba con reemplazo,
+  nunca terminaba y "Anterior" lo ignoraba: nuevo `PlaylistOrder`. (4)
+  Claves por ruta sin normalizar: `formats.normalize_path()` al entrar a
+  la playlist y `path_key()` (normcase+abspath) en resume/bookmarks/
+  recientes, con migración de claves viejas al leer. (5) Detener/quitar de
+  la lista perdía la posición (tras `stop()` el tiempo es -1): se guarda
+  antes. (6) `bookmarks.json` se leía 4 veces por segundo: caché por
+  pista. (7) Flechas arriba/abajo con la lista enfocada cambiaban el
+  volumen: `ShortcutOverride` aceptado para la lista; Enter reproduce,
+  Supr/menú quitan la selección múltiple. (8) JSON escrito sin atomicidad:
+  `player/jsonstore.py` (temporal + `os.replace`, `.bak`, validación de
+  tipos; `positions.json` con tope de 1000). (9) `.m3u`: rutas relativas a
+  la carpeta de la lista, UTF-8→cp1252 en vez de `errors="ignore"`,
+  `file:///`, errores de E/S con aviso (`player/m3u.py`). (10) Recrear el
+  `vlc.Instance` no liberaba el viejo (ni el reproductor de vista previa,
+  que además seguía decodificando): `_release_instance()`; se reaplica el
+  zoom; cambiar el tamaño de subtítulos usa
+  `VLCPlayer.reload_preserving_state()` en vez de `play_index()`
+  (conserva posición, pausa, pistas, subtítulos externos, desfase, A-B y
+  marcadores). Cubierto por `tests/test_playlist_order.py`,
+  `tests/test_persistence.py` y `tests/test_playback_fixes.py`.
 
 - **Espacio y las flechas de teclado a veces no respondían.** Los botones
   de transporte y los sliders de la barra de controles (`player/main_window.py`)

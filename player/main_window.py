@@ -1,5 +1,4 @@
 import os
-import random
 import subprocess
 import sys
 import tempfile
@@ -35,7 +34,9 @@ from . import __version__
 from .backend import VLCPlayer
 from .bookmarks import add_bookmark, get_bookmarks
 from .bookmarks_dialog import BookmarksDialog
-from .formats import ALL_EXTS, build_open_filter, format_time, is_audio_file, is_url
+from .formats import ALL_EXTS, build_open_filter, format_time, is_audio_file, is_url, normalize_path
+from .m3u import format_m3u, parse_m3u
+from .playlist_order import PlaylistOrder, playback_failed
 from .recent_files import add_recent_file, clear_recent_files, get_recent_files
 from .resume import clear_position, get_saved_position_ms, save_position
 from .subtitle_dialog import OnlineSubtitleDialog
@@ -62,6 +63,21 @@ class VideoFrame(QFrame):
     def mouseMoveEvent(self, event):
         self.mouseMoved.emit()
         super().mouseMoveEvent(event)
+
+
+# Teclas que, con la playlist enfocada, son para navegarla y no los atajos
+# globales de la ventana (subir/bajar volumen). Izquierda/Derecha siguen
+# buscando +-5s: en una lista vertical no hacen nada util.
+PLAYLIST_NAVIGATION_KEYS = frozenset({Qt.Key.Key_Up, Qt.Key.Key_Down})
+
+
+def playlist_owns_key(event) -> bool:
+    """True si este QKeyEvent (tipicamente un ShortcutOverride) debe llegarle
+    al QListWidget de la playlist en vez de disparar un QShortcut de ventana.
+    Solo las flechas sin modificadores: Ctrl+Flecha sigue siendo
+    Anterior/Siguiente pista."""
+    mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+    return event.key() in PLAYLIST_NAVIGATION_KEYS and mods == Qt.KeyboardModifier.NoModifier
 
 
 class PositionSlider(QSlider):
@@ -225,7 +241,16 @@ class MainWindow(QMainWindow):
         self.dragging_slider = False
         self.repeat_mode = "none"  # none | one | all
         self.shuffle = False
+        self.order = PlaylistOrder()
         self._advancing = False
+        # Fallos seguidos (archivo roto/inexistente): al completar una vuelta
+        # entera sin que nada se pueda reproducir, se detiene en vez de
+        # reintentar para siempre (ver _handle_track_finished).
+        self._consecutive_failures = 0
+        self._max_time_seen_ms = 0
+        # Marcadores de la pista actual: (ruta, lista). Leer bookmarks.json
+        # en cada tick de 250 ms era innecesario (ver _current_bookmarks).
+        self._bookmarks_cache = None
         self._dock_was_visible = True
         self.equalizer_dialog = None
         self.bookmarks_dialog = None
@@ -330,8 +355,15 @@ class MainWindow(QMainWindow):
         # Playlist dock
         self.playlist_widget = QListWidget()
         self.playlist_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.playlist_widget.itemDoubleClicked.connect(
+        # itemActivated cubre doble clic Y Enter/Return sobre el item enfocado.
+        self.playlist_widget.itemActivated.connect(
             lambda item: self.play_index(self.playlist_widget.row(item))
+        )
+        self.playlist_widget.installEventFilter(self)
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Delete), self.playlist_widget,
+            activated=self.remove_selected_from_playlist,
+            context=Qt.ShortcutContext.WidgetShortcut,
         )
         self.playlist_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.playlist_widget.customContextMenuRequested.connect(self.show_playlist_context_menu)
@@ -681,10 +713,15 @@ class MainWindow(QMainWindow):
         return f"{prefix} {os.path.basename(path)}"
 
     def add_files_to_playlist(self, paths):
+        """Unico punto de entrada a la playlist (dialogos, carpetas, arrastrar
+        y soltar, linea de comandos, recientes, .m3u): normaliza aqui cada
+        ruta local una sola vez (ver formats.normalize_path)."""
+        paths = [normalize_path(p) for p in paths]
         for p in paths:
             item = QListWidgetItem(self._display_name(p))
             item.setData(Qt.ItemDataRole.UserRole, p)
             self.playlist_widget.addItem(item)
+        self.order.append(len(paths))
 
     def _update_playlist_item_duration(self, index: int, path: str, length_ms: int):
         item = self.playlist_widget.item(index)
@@ -757,12 +794,17 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Guardar lista de reproducción", "playlist.m3u", "Playlist M3U (*.m3u)")
         if not path:
             return
-        if not path.lower().endswith(".m3u"):
+        if not path.lower().endswith((".m3u", ".m3u8")):
             path += ".m3u"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("#EXTM3U\n")
-            for i in range(self.playlist_widget.count()):
-                f.write(self.playlist_widget.item(i).data(Qt.ItemDataRole.UserRole) + "\n")
+        entries = [
+            self.playlist_widget.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.playlist_widget.count())
+        ]
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(format_m3u(entries))
+        except OSError as exc:
+            QMessageBox.warning(self, "Guardar lista", f"No se pudo guardar la lista:\n{exc}")
 
     def load_playlist(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -770,13 +812,13 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        entries = []
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                entries.append(line)
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            QMessageBox.warning(self, "Cargar lista", f"No se pudo leer la lista:\n{exc}")
+            return
+        entries = parse_m3u(data, path)
         if entries:
             start_index = self.playlist_widget.count()
             self.add_files_to_playlist(entries)
@@ -792,30 +834,67 @@ class MainWindow(QMainWindow):
         act_clear = menu.addAction("Vaciar lista")
         act_play.setEnabled(item is not None)
         act_remove.setEnabled(item is not None)
+        if item is not None and len(self.playlist_widget.selectedItems()) > 1 and item.isSelected():
+            act_remove.setText("Quitar seleccionados de la lista")
         chosen = menu.exec(self.playlist_widget.mapToGlobal(pos))
         if chosen == act_play and item is not None:
             self.play_index(self.playlist_widget.row(item))
         elif chosen == act_remove and item is not None:
-            row = self.playlist_widget.row(item)
-            self.playlist_widget.takeItem(row)
-            if row == self.current_index:
-                self.current_index = -1
-                self.player.stop()
-            elif row < self.current_index:
-                self.current_index -= 1
+            # Clic derecho sobre un item seleccionado quita toda la seleccion;
+            # sobre uno no seleccionado, solo ese (como el Explorador).
+            if item.isSelected():
+                self.remove_selected_from_playlist()
+            else:
+                self.remove_rows([self.playlist_widget.row(item)])
         elif chosen == act_clear:
-            self.playlist_widget.clear()
-            self.current_index = -1
+            self.clear_playlist()
+
+    def remove_selected_from_playlist(self):
+        self.remove_rows([self.playlist_widget.row(i) for i in self.playlist_widget.selectedItems()])
+
+    def remove_rows(self, rows):
+        rows = sorted({r for r in rows if 0 <= r < self.playlist_widget.count()})
+        if not rows:
+            return
+        if self.current_index in rows:
+            # Guardar ANTES de detener: tras stop() libVLC reporta -1 de
+            # tiempo/largo y save_position no guardaria nada.
+            self._save_current_position()
             self.player.stop()
+            self.player.stop_preview()
+            self.current_index = -1
+        else:
+            self.current_index -= sum(1 for r in rows if r < self.current_index)
+        for r in reversed(rows):
+            self.playlist_widget.takeItem(r)
+        self.order.remove(rows)
+
+    def clear_playlist(self):
+        self._save_current_position()
+        self.playlist_widget.clear()
+        self.current_index = -1
+        self.player.stop()
+        self.player.stop_preview()
+        self.order.reset(0)
 
     # ------------------------------------------------------------ transport
-    def play_index(self, index: int):
+    def play_index(self, index: int, user: bool = True):
+        """user=False solo cuando la llama el avance automatico (fin de
+        pista o fallo); cualquier eleccion del usuario reinicia el conteo
+        de fallos seguidos."""
         item = self.playlist_widget.item(index)
         if item is None:
             return
         self._save_current_position()
+        if user:
+            self._consecutive_failures = 0
         path = item.data(Qt.ItemDataRole.UserRole)
         self.current_index = index
+        self.order.jump_to(index)
+        self._max_time_seen_ms = 0
+        self._bookmarks_cache = None
+        if self.player.preview_current_path() not in (None, path):
+            self.player.stop_preview()
         self.playlist_widget.setCurrentRow(index)
         self._advancing = False
         self.loop_point_a = None
@@ -854,12 +933,21 @@ class MainWindow(QMainWindow):
     def toggle_play_pause(self):
         if self.current_index == -1:
             if self.playlist_widget.count() > 0:
-                self.play_index(0)
+                first = self.order.advance(repeat_all=False)
+                self.play_index(first if first is not None else 0)
+            return
+        if self.player.is_idle():
+            # Tras Detener, fin de la lista o un fallo, pause() de libVLC no
+            # hace nada: hay que volver a arrancar la pista actual.
+            self.play_index(self.current_index)
             return
         self.player.toggle_pause()
 
     def stop(self):
+        # Guardar antes: despues de stop() get_time()/get_length() valen -1.
+        self._save_current_position()
         self.player.stop()
+        self.player.stop_preview()
 
     def step_frame(self):
         if self.current_index == -1:
@@ -870,32 +958,25 @@ class MainWindow(QMainWindow):
         if self.player.next_frame():
             self._show_osd("Fotograma siguiente")
 
-    def play_next(self, auto: bool):
+    def play_next(self, auto: bool, after_failure: bool = False):
+        """auto: la pista termino sola (no fue el boton Siguiente).
+        after_failure: la pista actual no se pudo reproducir -- en ese caso
+        se ignora Repetir: Uno (si no, reintentaria el mismo archivo roto
+        para siempre, cada 250 ms)."""
         count = self.playlist_widget.count()
         if count == 0:
             return
-        if self.repeat_mode == "one" and auto:
-            self.play_index(self.current_index)
+        if self.repeat_mode == "one" and auto and not after_failure and self.current_index != -1:
+            self.play_index(self.current_index, user=False)
             return
-        if self.shuffle:
-            next_index = self.current_index
-            if count > 1:
-                while next_index == self.current_index:
-                    next_index = random.randint(0, count - 1)
-            else:
-                next_index = 0
-        else:
-            next_index = self.current_index + 1
-            if next_index >= count:
-                if self.repeat_mode == "all":
-                    next_index = 0
-                elif auto:
-                    self.player.stop()
-                    self._handle_playlist_finished()
-                    return
-                else:
-                    return
-        self.play_index(next_index)
+        next_index = self.order.advance(repeat_all=self.repeat_mode == "all")
+        if next_index is None:
+            if auto:
+                self.player.stop()
+                self.player.stop_preview()
+                self._handle_playlist_finished()
+            return
+        self.play_index(next_index, user=not auto)
 
     def _handle_playlist_finished(self):
         action = self.on_finish_action
@@ -923,17 +1004,15 @@ class MainWindow(QMainWindow):
         if self.player.get_time_ms() > 3000:
             self.player.set_time_ms(0)
             return
-        prev_index = self.current_index - 1
-        if prev_index < 0:
-            if self.repeat_mode == "all":
-                prev_index = self.playlist_widget.count() - 1
-            else:
-                self.player.set_time_ms(0)
-                return
+        prev_index = self.order.back(repeat_all=self.repeat_mode == "all")
+        if prev_index is None:
+            self.player.set_time_ms(0)
+            return
         self.play_index(prev_index)
 
     def _on_shuffle_toggled(self, checked: bool):
         self.shuffle = checked
+        self.order.set_shuffle(checked)
 
     def _cycle_repeat_mode(self):
         order = ["none", "all", "one"]
@@ -966,11 +1045,23 @@ class MainWindow(QMainWindow):
             markers.append((self.loop_point_a / length_ms, _LOOP_MARKER_COLOR))
         if self.loop_point_b is not None:
             markers.append((self.loop_point_b / length_ms, _LOOP_MARKER_COLOR))
-        path = self._current_path_or_none()
-        if path is not None and not is_url(path):
-            for b in get_bookmarks(path):
-                markers.append((b["position_ms"] / length_ms, _BOOKMARK_MARKER_COLOR))
+        for b in self._current_bookmarks():
+            markers.append((b["position_ms"] / length_ms, _BOOKMARK_MARKER_COLOR))
         self.position_slider.set_markers(markers)
+
+    def _current_bookmarks(self) -> list:
+        """Marcadores de la pista actual, leidos de disco una vez por pista
+        (se invalida al cambiar de pista o al agregar/quitar/renombrar, ver
+        _invalidate_bookmarks_cache) en vez de en cada tick de update_ui."""
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            return []
+        if self._bookmarks_cache is None or self._bookmarks_cache[0] != path:
+            self._bookmarks_cache = (path, get_bookmarks(path))
+        return self._bookmarks_cache[1]
+
+    def _invalidate_bookmarks_cache(self):
+        self._bookmarks_cache = None
 
     def quick_add_bookmark(self):
         path = self._current_path_or_none()
@@ -981,6 +1072,7 @@ class MainWindow(QMainWindow):
         name, ok = QInputDialog.getText(self, "Nuevo marcador", "Nombre:", text=default_name)
         if ok and name.strip():
             add_bookmark(path, name.strip(), position_ms)
+            self._invalidate_bookmarks_cache()
             self.statusBar().showMessage(f'Marcador "{name.strip()}" agregado en {format_time(position_ms)}', 3000)
 
     def show_bookmarks(self):
@@ -991,6 +1083,7 @@ class MainWindow(QMainWindow):
         if self.bookmarks_dialog is not None:
             self.bookmarks_dialog.close()
         self.bookmarks_dialog = BookmarksDialog(self.player, path, self)
+        self.bookmarks_dialog.bookmarks_changed.connect(self._invalidate_bookmarks_cache)
         self.bookmarks_dialog.show()
 
     # ------------------------------------------------------------ sliders
@@ -1052,6 +1145,12 @@ class MainWindow(QMainWindow):
     def _on_slider_hover_ended(self):
         self._preview_hover_timer.stop()
         self._hide_hover_preview()
+        if not self.player.is_preview_warmed_up():
+            # Todavia no salio ningun fotograma, asi que no se puede pausar
+            # sin romper su vout (ver VLCPlayer.load_preview_media): se
+            # detiene para que no siga decodificando todo el archivo en
+            # segundo plano hasta el proximo hover.
+            self.player.stop_preview()
 
     def _show_hover_preview(self):
         path = self._current_path_or_none()
@@ -1131,23 +1230,51 @@ class MainWindow(QMainWindow):
         if self.loop_point_b is not None and self.player.get_time_ms() >= self.loop_point_b:
             self.player.set_time_ms(self.loop_point_a)
 
+        self.player.apply_pending_restore()
+
         state = self.player.get_state()
-        if state == vlc.State.Error and not self._advancing and self.current_index != -1:
-            failed_item = self.playlist_widget.item(self.current_index)
-            failed_name = self._display_name(failed_item.data(Qt.ItemDataRole.UserRole)) if failed_item else "?"
-            self.statusBar().showMessage(f"No se pudo reproducir: {failed_name}", 5000)
+        if state == vlc.State.Playing:
+            time_ms = self.player.get_time_ms()
+            self._max_time_seen_ms = max(self._max_time_seen_ms, time_ms)
+            if time_ms > 0 or length > 0:
+                self._consecutive_failures = 0
+        if state in (vlc.State.Error, vlc.State.Ended) and not self._advancing and self.current_index != -1:
             self._advancing = True
-            self.play_next(auto=True)
-            self._advancing = False
-        elif state == vlc.State.Ended and not self._advancing and self.current_index != -1:
-            # Se vio/escuchó completo: la próxima vez que se abra, empieza de
-            # nuevo en vez de "reanudar" a un segundo del final.
-            finished_path = self._current_path_or_none()
-            if finished_path is not None and not is_url(finished_path):
-                clear_position(finished_path)
-            self._advancing = True
-            self.play_next(auto=True)
-            self._advancing = False
+            try:
+                self._handle_track_finished(state)
+            finally:
+                self._advancing = False
+
+    def _handle_track_finished(self, state):
+        failed = playback_failed(
+            error_seen=self.player.error_seen(),
+            state_is_error=state == vlc.State.Error,
+            state_is_ended=state == vlc.State.Ended,
+            length_ms=self.player.get_length_ms(),
+            max_time_ms=self._max_time_seen_ms,
+        )
+        path = self._current_path_or_none()
+        if failed:
+            self._consecutive_failures += 1
+            name = self._display_name(path) if path is not None else "?"
+            if self._consecutive_failures >= self.playlist_widget.count():
+                # Una vuelta completa sin poder reproducir nada: detenerse en
+                # vez de reintentar en bucle (y reescribir recientes cada vez).
+                self.player.stop()
+                self.player.stop_preview()
+                self._consecutive_failures = 0
+                self.statusBar().showMessage(
+                    f"No se pudo reproducir: {name}. Ningún elemento de la lista se pudo reproducir; detenido.", 0
+                )
+                return
+            self.statusBar().showMessage(f"No se pudo reproducir: {name}", 5000)
+            self.play_next(auto=True, after_failure=True)
+            return
+        # Se vio/escuchó completo: la próxima vez que se abra, empieza de
+        # nuevo en vez de "reanudar" a un segundo del final.
+        if path is not None and not is_url(path):
+            clear_position(path)
+        self.play_next(auto=True)
 
     # ------------------------------------------------------------ tracks
     def _populate_audio_track_menu(self):
@@ -1207,16 +1334,13 @@ class MainWindow(QMainWindow):
         if self.current_index == -1:
             return
         # --sub-text-scale es de instancia: para verlo aplicado ya mismo hay
-        # que recrear el Instance (VLCPlayer.load() lo hace solo), lo que
-        # implica recargar el archivo actual. Se preserva posición y estado
-        # de pausa para que el cambio se sienta transparente.
-        was_playing = self.player.is_playing()
-        position = self.player.get_position()
-        self.play_index(self.current_index)
-        if position > 0:
-            self.player.set_position(position)
-        if not was_playing:
-            self.player.set_paused(True)
+        # que recrear el Instance y recargar el archivo actual. Se hace con
+        # VLCPlayer.reload_preserving_state() y NO con play_index(): esta
+        # ultima es "abrir pista" (borra el tramo A-B, cierra el dialogo de
+        # marcadores, descarta subtitulos externos, pistas elegidas y el
+        # desfase, reescribe recientes). Si esta detenido, no hace nada: la
+        # proxima carga ya recrea el Instance con el tamano nuevo.
+        self.player.reload_preserving_state()
 
     def take_snapshot(self):
         if self.current_index == -1:
@@ -1294,6 +1418,17 @@ class MainWindow(QMainWindow):
         self._fullscreen_idle_timer.start()
 
     def eventFilter(self, obj, event):
+        if (
+            event.type() == QEvent.Type.ShortcutOverride
+            and obj is self.playlist_widget
+            and playlist_owns_key(event)
+        ):
+            # Aceptar el ShortcutOverride hace que Qt entregue la tecla al
+            # widget enfocado en vez de disparar el QShortcut de ventana
+            # (flecha arriba/abajo = volumen): con la playlist enfocada las
+            # flechas mueven la seleccion.
+            event.accept()
+            return True
         if event.type() == QEvent.Type.MouseMove and self.isFullScreen():
             self._on_fullscreen_mouse_activity()
         return super().eventFilter(obj, event)

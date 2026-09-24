@@ -24,9 +24,20 @@ aleatorio/repetir, y poder guardar/recuperar esa cola como un archivo
 - **Guardar / cargar**: Archivo → "Guardar lista (.m3u)..." / "Cargar
   lista...". El formato es un `.m3u` plano (una ruta o URL por línea, con
   cabecera `#EXTM3U`), compatible con otros reproductores.
-- **Aleatorio**: botón "Aleatorio" en la barra de controles — al pasar a
-  la siguiente pista automáticamente, elige una pista distinta a la actual
-  al azar en vez de la siguiente en orden.
+- **Aleatorio**: botón "Aleatorio" en la barra de controles — baraja la
+  lista una vez (sin reemplazo: cada pista suena una sola vez por vuelta,
+  ver `player/playlist_order.py::PlaylistOrder`). Con Repetir: No la
+  reproducción termina al agotar la vuelta (y dispara "Al terminar la
+  lista"); con Repetir: Todo se baraja una vuelta nueva sin repetir de
+  inmediato la última. "Anterior" recorre el historial real de lo que
+  sonó. Agregar pistas las intercala entre las pendientes; quitar pistas
+  las saca del orden.
+- **Teclado en la lista**: con la lista enfocada, flecha arriba/abajo
+  mueven la selección (no el volumen), Enter reproduce, Supr quita todos
+  los seleccionados (también "Quitar seleccionados" en el menú contextual).
+- **Archivos que no se pueden reproducir** se saltan con un aviso en la
+  barra de estado, incluso con Repetir: Uno; si falla una vuelta completa
+  seguida, se detiene en vez de reintentar para siempre.
 - **Repetir**: botón "Repetir", cicla entre No / Todo / Uno cada vez que se
   hace clic.
 
