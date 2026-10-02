@@ -53,6 +53,8 @@ tener VLC instalado.
 | Lectura/escritura de `.m3u` | `player/m3u.py` |
 | JSON atómico con `.bak` para el estado del usuario | `player/jsonstore.py` |
 | Configuración persistente del usuario (API keys) | `player/config.py` |
+| Ajustes y sesión (playlist) entre ejecuciones | `player/settings.py` (`settings.json`, `session.json`) |
+| Log rotativo, excepthooks y `faulthandler` | `player/logs.py` (configurado desde `run.py`) |
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
 | Ícono de la app (ventana + `.exe`) | `player/assets/icon.png`, `player/assets/icon.ico` |
@@ -62,16 +64,22 @@ tener VLC instalado.
 ## Release
 
 ```text
-dist/ReproductorMultimediaPro.exe
+dist/ReproductorMultimediaPro/ReproductorMultimediaPro.exe   (carpeta onedir)
+dist/installer/ReproductorMultimediaPro-<version>-setup.exe  (Inno Setup, por usuario)
 ```
 
-Se genera con `pyinstaller ReproductorMultimediaPro.spec`, manualmente o
-automáticamente en cada push a `main`/`master` vía
+Se genera con `pyinstaller --noconfirm ReproductorMultimediaPro.spec` (y
+`iscc installer\ReproductorMultimediaPro.iss` para el instalador), manualmente o
+automáticamente tras cada push a `main`/`master` con el CI en verde vía
 `.github/workflows/build-exe.yml` (queda como artifact descargable en la
 ejecución correspondiente de GitHub Actions). Ver
 [docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md).
-No empaqueta VLC: la máquina que ejecute el `.exe` necesita tener VLC media
-player instalado aparte, igual que al correr desde el código fuente.
+No empaqueta VLC por defecto: la máquina que ejecute el `.exe` necesita VLC
+3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado; ver
+README). **El cambio a onedir, el recorte de módulos Qt, el instalador y la
+opción BUNDLE_VLC no se construyeron ni probaron todavía** (solo se validó
+la sintaxis del spec y del YAML): falta un build real y una prueba de
+arranque del instalado.
 
 ## Recently Added
 
@@ -329,20 +337,74 @@ creciendo.
 
 ## Known Issues
 
-- **No hay persistencia de ajustes entre sesiones.** Volumen, tamaño de
-  ventana, última carpeta abierta, etc. se resetean cada vez que se abre la
-  app. No implementado todavía (candidato: `QSettings`).
-- **El visualizador de audio solo se activa para archivos locales cuya
-  extensión es de audio puro** (`player.formats.is_audio_file`). Un stream
-  de audio por URL (p. ej. una radio por HTTP) no dispara el visualizador,
-  porque no hay forma de saber por la URL si el contenido es audio o video
-  antes de reproducirlo.
-- **El `.exe` empaquetado no incluye VLC.** Si se distribuye a otra
-  máquina, esa máquina necesita instalar VLC (arquitectura de 32/64 bits
-  coincidente con la del build) para que `libvlc.dll` se encuentre en
-  tiempo de ejecución.
+- **Falta verificar a mano con un video real**: que el OSD y el
+  controlador de pantalla completa se ven *encima* del video, la rueda y el
+  clic derecho sobre el video (dependen de que la ventana hija de libVLC
+  quede deshabilitada), varios monitores/DPI, y que RTX Video Super
+  Resolution / RTX Video HDR realmente se activan (requieren la GPU y el
+  panel de NVIDIA; la plataforma `offscreen` de las pruebas no renderiza
+  libVLC).
+- **El ecualizador redondea a dB enteros** en los sliders: desactivarlo y
+  volver a activarlo reenvía esos enteros (un preset de pasos de 0,8 dB
+  cambia levemente). Los valores guardados entre sesiones sí son exactos.
+- **Build sin probar**: onedir + instalador Inno Setup + `BUNDLE_VLC` (ver
+  Release).
+- **`main_window.py` sigue siendo grande**: se separaron widgets,
+  ecualizador, energía, vista previa, tema, diálogo de URL, una sola
+  ventana y la expansión de entradas, pero la lista de reproducción sigue
+  siendo un `QListWidget` (no modelo/vista) y `MainWindow` todavía cablea
+  todo.
+- **Recorrer una carpeta grande** sigue siendo en el hilo de la UI (con
+  orden natural); las duraciones sí se leen en segundo plano.
 
 ## Recently Fixed
+
+- **Tanda P2 del informe de mejoras (2026-09-30).** URLs: cualquier
+  `esquema://` salvo `file:` es una URL (antes rtsps/srt/rtp/ftp/smb llegaban
+  a `media_new_path` como `srt:\host`). Transiciones por **eventos de
+  libVLC** (`PlayerEvents`, con número de generación para descartar eventos
+  del archivo anterior); `main_window.py` ya no importa `vlc`; el tick bajó a
+  500 ms y el tramo A-B usa un temporizador propio de 50 ms. `vlc.Instance`
+  = `None` (opción desconocida) ya no rompe la reproducción: se reintenta sin
+  la mejora por GPU / el visualizador y se avisa. Streams: `--http-reconnect`,
+  diálogo de URL con caché/RTSP-TCP, búfer, "EN VIVO", título ICY, watchdog
+  de 15 s, visualizador para URLs de solo audio. Una sola ventana
+  (`QLocalServer`), `expand_inputs` para carpetas/.m3u, capítulos, desfase de
+  audio, ciclo de vida de los hilos de subtítulos (no se cargan en otro
+  video, errores siempre informados, sin destruir hilos en marcha al cerrar),
+  atajos y menús nuevos, lista reordenable con buscador y metadatos, tema,
+  traducción `qtbase_es`, RTX VSR/HDR, vista previa liviana con caché,
+  cuenta regresiva para apagar/hibernar/reiniciar, reanudar vía
+  `:start-time`, controlador de pantalla completa propio. Detalle y estado
+  por punto en el informe (`improvement_reports/media_player_pro.md`).
+
+- **Tanda P1 del informe de mejoras (2026-09-30).**
+  (1) **Presets del ecualizador**: `vlc.AudioEqualizer(indice)` toma el
+  entero como puntero C; elegir un preset daba *access violation* y rompía
+  cada cambio de banda y cada recreación del `Instance`. Ahora
+  `libvlc_audio_equalizer_new_from_preset()` (índice inválido → `False`) y
+  el ecualizador anterior se libera (`tests/test_equalizer.py`).
+  (2) **La ventana de video de libVLC se quedaba con el mouse y el
+  teclado**: `disable_vlc_input()` (`video_set_mouse_input/key_input(False)`)
+  en cada `MediaPlayer` creado, principal y de vista previa; verificado con
+  una ventana Win32 oculta que la ventana hija de libVLC queda
+  deshabilitada (`tests/test_video_input.py`). Doble clic, movimiento del
+  mouse en pantalla completa y atajos tras un clic en el video llegan a Qt.
+  (3) **OSD y controles flotantes pintados debajo del video**: ahora viven
+  en ventanas superpuestas propias (`OverlayWindow`: top-level, sin marco,
+  translúcidas, sin foco, dueña la ventana principal) que siguen a
+  `video_frame`; se ocultan al minimizar o cambiar de aplicación. El cursor
+  se oculta sin actividad en pantalla completa.
+  (4) **Atajos en pantalla completa**: los `QAction` de los menús se
+  registran también en la ventana (Espacio, F, M... seguían muertos con la
+  barra de menús oculta); la barra de estado se oculta y sus mensajes van
+  al OSD. (5) **Ajustes y sesión** persistentes (`player/settings.py`).
+  (6) **Registro de errores** para el `.exe` sin consola (`player/logs.py`).
+  (7) `VLCPlayer.is_muted()` devuelve el estado propio (libVLC da -1 tras
+  `stop()` y el botón de silencio no hacía nada). (8) CI en Windows
+  (3.12 y 3.14) y el build del `.exe` espera a que el CI pase.
+  `tests/conftest.py` aísla `Path.home()` y `%LOCALAPPDATA%` para toda la
+  suite (`tests/test_window_state.py`, `test_settings.py`, `test_logs.py`).
 
 - **Tanda de 10 bugs de transporte/playlist/persistencia (revisión contra
   libVLC 3.0.23).** (1) Reproducir tras Detener o fin de lista no hacía
