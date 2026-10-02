@@ -21,6 +21,10 @@ class PlaylistOrder:
         self._shuffle = False
         self._history = []   # pistas que ya sonaron (aleatorio), la ultima al final
         self._upcoming = []  # pistas que faltan en esta vuelta (aleatorio)
+        # Fila que ocupo la siguiente pista cuando se quito la actual (ver
+        # remove): "Siguiente"/"Reproducir" siguen desde ahi en vez de
+        # volver a la primera de la lista.
+        self._next_hint = None
 
     # -- estado -------------------------------------------------------------
     @property
@@ -54,6 +58,7 @@ class PlaylistOrder:
         """El usuario (o advance/back) eligio esta pista. En aleatorio, la
         actual pasa al historial y la elegida sale de las pendientes, para
         no repetirla en esta vuelta."""
+        self._next_hint = None
         if index == self._current:
             return
         if self._shuffle:
@@ -68,6 +73,14 @@ class PlaylistOrder:
         la lista termino (sin Repetir: Todo)."""
         if self._count == 0:
             return None
+        if not self._shuffle and self._current == -1 and self._next_hint is not None:
+            nxt, self._next_hint = self._next_hint, None
+            if nxt >= self._count:
+                if not repeat_all:
+                    return None
+                nxt = 0
+            self._current = nxt
+            return nxt
         if not self._shuffle:
             nxt = self._current + 1
             if nxt >= self._count:
@@ -118,6 +131,7 @@ class PlaylistOrder:
     def reset(self, count: int = 0):
         self._count = count
         self._current = -1
+        self._next_hint = None
         self.set_shuffle(self._shuffle)
 
     def append(self, n: int):
@@ -142,8 +156,14 @@ class PlaylistOrder:
                 shift += 1
             else:
                 remap[i] = i - shift
+        old_current = self._current
         self._count -= len(removed & set(range(self._count)))
         self._current = remap.get(self._current, -1)
+        if old_current != -1 and old_current in removed:
+            # La pista que seguia ahora ocupa esta fila.
+            self._next_hint = old_current - sum(1 for r in removed if r < old_current)
+        elif self._next_hint is not None:
+            self._next_hint -= sum(1 for r in removed if r < self._next_hint)
         self._history = self._dedupe_adjacent([remap[i] for i in self._history if i in remap])
         self._upcoming = [remap[i] for i in self._upcoming if i in remap]
 
@@ -160,6 +180,21 @@ class PlaylistOrder:
             self._current = remap[self._current]
         self._history = [remap[i] for i in self._history]
         self._upcoming = [remap[i] for i in self._upcoming]
+
+    def reorder(self, new_order):
+        """La lista se reordeno entera (arrastrar varias filas, ordenar por
+        nombre): new_order[i] es el indice VIEJO de la fila que ahora esta
+        en la posicion i. Igual que move(), el aleatorio sigue apuntando a
+        las mismas pistas."""
+        new_order = list(new_order)
+        if sorted(new_order) != list(range(self._count)):
+            raise ValueError("new_order no es una permutacion de la lista")
+        remap = {old: new for new, old in enumerate(new_order)}
+        if self._current != -1:
+            self._current = remap[self._current]
+        self._history = [remap[i] for i in self._history]
+        self._upcoming = [remap[i] for i in self._upcoming]
+        self._next_hint = None
 
     @staticmethod
     def _dedupe_adjacent(items: list) -> list:

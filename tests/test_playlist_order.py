@@ -1,5 +1,7 @@
 import random
 
+import pytest
+
 from player.playlist_order import PlaylistOrder, playback_failed
 
 
@@ -151,3 +153,49 @@ def test_playback_failed_classification():
     assert not playback_failed(False, False, True, 0, 5000)
     # Mientras sigue reproduciendo nunca es fallo.
     assert not playback_failed(True, False, False, 0, 0)
+
+
+# ---------------------------------------- reordenar / quitar la actual (4.5)
+def test_removing_the_current_track_continues_with_the_one_that_took_its_place():
+    order = PlaylistOrder(5)
+    order.jump_to(2)
+    order.remove([2])
+    assert order.current == -1
+    assert order.advance(repeat_all=False) == 2  # antes volvia a 0
+
+
+def test_removing_the_last_current_track_ends_or_wraps():
+    order = PlaylistOrder(3)
+    order.jump_to(2)
+    order.remove([2])
+    assert order.advance(repeat_all=False) is None
+    order = PlaylistOrder(3)
+    order.jump_to(2)
+    order.remove([1, 2])
+    assert order.advance(repeat_all=True) == 0
+
+
+def test_next_hint_follows_later_removals_and_is_dropped_by_a_jump():
+    order = PlaylistOrder(6)
+    order.jump_to(3)
+    order.remove([3])
+    order.remove([0])
+    assert order.advance(repeat_all=False) == 2
+    order = PlaylistOrder(4)
+    order.jump_to(1)
+    order.remove([1])
+    order.jump_to(0)
+    assert order.advance(repeat_all=False) == 1
+
+
+def test_reorder_keeps_current_and_shuffle_pointing_at_the_same_tracks():
+    order = PlaylistOrder(4, rng=random.Random(3))
+    order.jump_to(1)
+    order.set_shuffle(True)
+    upcoming = order.upcoming()
+    new_order = [3, 1, 0, 2]  # fila nueva i <- fila vieja new_order[i]
+    order.reorder(new_order)
+    assert order.current == 1
+    assert [new_order[i] for i in order.upcoming()] == upcoming
+    with pytest.raises(ValueError):
+        order.reorder([0, 0, 1, 2])
