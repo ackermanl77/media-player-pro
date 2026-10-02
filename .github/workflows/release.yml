@@ -1,0 +1,92 @@
+name: Release
+
+# Al subir una etiqueta de version (git tag v0.2.0 && git push origin v0.2.0):
+#   1. corre el workflow CI completo (Ubuntu + Windows 3.12/3.14);
+#   2. si pasa, construye la carpeta onedir con ReproductorMultimediaPro.spec
+#      (el .exe lleva el recurso de version generado de player.__version__),
+#      la comprime en un .zip, arma el instalador de Inno Setup y calcula
+#      los SHA-256;
+#   3. publica un GitHub Release de esa etiqueta con los tres archivos.
+# La etiqueta tiene que coincidir con player.__version__ ("v" + version): si
+# no, falla antes de construir nada.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write  # crear el Release y subir los archivos
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-build.txt
+
+      - name: Check tag against player.__version__
+        shell: pwsh
+        run: |
+          $version = python -c "import player; print(player.__version__)"
+          if ("${{ github.ref_name }}" -ne "v$version") {
+            Write-Error "La etiqueta ${{ github.ref_name }} no coincide con player.__version__ ($version)"
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      # Sin VLC: PyInstaller no lo necesita (el .exe usa el VLC del equipo).
+      - name: Install build dependencies
+        run: pip install -r requirements-build.txt -c constraints.txt
+
+      # Carpeta onedir: dist/ReproductorMultimediaPro/
+      - name: Build application folder
+        run: pyinstaller --noconfirm ReproductorMultimediaPro.spec
+
+      - name: Check the exe version resource
+        shell: pwsh
+        run: |
+          $info = (Get-Item dist\ReproductorMultimediaPro\ReproductorMultimediaPro.exe).VersionInfo
+          "ProductVersion=$($info.ProductVersion) FileVersion=$($info.FileVersion) Description=$($info.FileDescription)"
+          if ($info.ProductVersion -ne $env:VERSION) {
+            Write-Error "El .exe dice $($info.ProductVersion), se esperaba $env:VERSION"
+            exit 1
+          }
+
+      - name: Zip application folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Compress-Archive -Path dist\ReproductorMultimediaPro -DestinationPath "release\ReproductorMultimediaPro-$env:VERSION-windows-x64.zip"
+
+      # Inno Setup 6 viene instalado en windows-latest.
+      - name: Build installer
+        shell: pwsh
+        run: |
+          iscc /DAppVersion=$env:VERSION installer\ReproductorMultimediaPro.iss
+          Copy-Item dist\installer\*.exe release\
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem release -File | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content -Encoding ascii release\SHA256SUMS.txt
+          Get-Content release\SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" (Get-ChildItem release -File).FullName `
+            --title "Reproductor Multimedia Pro $env:VERSION" --generate-notes --verify-tag

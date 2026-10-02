@@ -15,9 +15,17 @@
 # obligaciones de la LGPL en README.md.
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 from PySide6.QtCore import QLibraryInfo
+
+# Version unica: player/__init__.py (__version__). De ahi sale el recurso de
+# version del .exe (Propiedades -> Detalles), ver packaging/version_resource.py.
+sys.path.insert(0, os.path.join(SPECPATH, "packaging"))
+from version_resource import build_version_info, read_version  # noqa: E402
+
+APP_VERSION = read_version(SPECPATH)
 
 hiddenimports = ["player.backend", "player.main_window", "player.formats"]
 hiddenimports += collect_submodules("player")
@@ -120,6 +128,7 @@ exe = EXE(
     upx=False,
     console=False,
     icon="player/assets/icon.ico",
+    version=build_version_info(APP_VERSION),
 )
 coll = COLLECT(
     exe,

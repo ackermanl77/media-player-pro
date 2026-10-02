@@ -1,6 +1,9 @@
 [project]
 name = "media-player-pro"
-version = "0.1.0"
+# Version unica en player/__init__.py (__version__): la leen setuptools, el
+# recurso de version del .exe (packaging/version_resource.py), el instalador
+# y el workflow de release.
+dynamic = ["version"]
 description = "Reproductor de musica y video de alta calidad basado en libVLC y PySide6"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +20,16 @@ build = ["pyinstaller>=6.10"]
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+# Solo el paquete "player" (installer/ y packaging/ son del build de Windows).
+[tool.setuptools]
+packages = ["player"]
+
+[tool.setuptools.package-data]
+player = ["assets/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "player.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

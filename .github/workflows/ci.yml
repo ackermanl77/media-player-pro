@@ -5,6 +5,8 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+  # release.yml lo llama antes de construir: no sale un Release con pruebas rotas.
+  workflow_call:
 
 jobs:
   test:
