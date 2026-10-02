@@ -20,7 +20,18 @@ falla en vez de trabar el job.
   `test_playlist_order.py`, `test_settings.py`: funciones puras, sin VLC ni Qt.
 - `tests/test_p2_features.py`: eventos de libVLC, capítulos (con
   `tests/assets/chapters.mkv`, un video de 6 s y 30 KB generado con ffmpeg),
-  desfase de audio, streams (servidor HTTP local), atajos, lista, tema.
+  desfase de audio, streams (servidor HTTP local), atajos, lista, tema,
+  franja de lo almacenado de un stream.
+- `tests/test_playlist_model.py`: modelo/vista de la lista y su
+  controlador (`player/playlist_model.py`, `player/playlist_controller.py`)
+  sin VLC; el analizador de metadatos se reemplaza por uno falso.
+- `tests/test_actions.py`: el registro de acciones (`player/actions.py`)
+  y que menús, menú contextual, botones y la ayuda de atajos usan los
+  mismos `QAction`.
+- `tests/test_version.py`: la versión única (`player.__version__`), el
+  recurso de versión del `.exe` (`packaging/version_resource.py`; la parte
+  que arma el objeto de PyInstaller se omite si no está instalado),
+  `pyproject.toml` y el workflow de release.
 - `tests/test_single_instance.py`: la segunda instancia es un proceso real
   que le pasa sus archivos a la primera por `QLocalServer`.
 - `tests/test_subtitle_lifecycle.py`: hilos de subtítulos sin red.
@@ -49,6 +60,12 @@ instalado con `choco`, Qt `offscreen`) y `test` en `ubuntu-latest`.
 `workflow_dispatch`), y construye exactamente el commit probado. El job de
 Windows todavía no se ejecutó en GitHub (se agregó sin poder correrlo);
 revisar la primera ejecución.
+
+`.github/workflows/release.yml` se dispara al subir una etiqueta `v*`:
+llama a `ci.yml` entero (`workflow_call`) y solo si pasa construye,
+comprime y publica el Release (ver
+[docs/workflows/packaging/workflow.md](../packaging/workflow.md)). Tampoco
+se ejecutó todavía en GitHub.
 
 El job de Ubuntu: Tres cosas que este runner necesita y que un entorno de
 escritorio normal no:

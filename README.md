@@ -47,7 +47,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   (HTTP(S), RTSP/RTSPS, RTMP(S), SRT, RTP, UDP, MMS/MMSH, FTP, SMB...).
   "Abrir URL" toma la dirección del portapapeles si parece una URL y permite
   ajustar la **caché de red** y **RTSP por TCP** (se recuerdan). Muestra
-  "Almacenando en búfer… N %", "EN VIVO" en streams sin duración (y
+  "Almacenando en búfer… N %", una franja translúcida en la barra con lo
+  ya almacenado delante de la posición (streams con duración; es el llenado
+  de la caché de red de libVLC), "EN VIVO" en streams sin duración (y
   desactiva la barra de búsqueda), el título que anuncia una radio por
   internet, reconecta streams HTTP cortados, y si un stream no responde en
   15 s ofrece Reintentar / Saltar / Seguir esperando. Una URL de solo audio
@@ -209,6 +211,14 @@ estándar) copia libVLC y un `plugins/` recortado dentro del paquete; la app
 lo usa si está y si no cae al VLC del sistema. Si distribuyes ese paquete,
 cumple la LGPL de libVLC (incluye su licencia y un enlace al código fuente
 de VLC).
+
+La versión vive solo en `player/__init__.py` (`__version__`):
+`pyproject.toml`, el recurso de versión del `.exe` (Propiedades → Detalles,
+generado por `packaging/version_resource.py`) y el instalador la toman de
+ahí. Para publicar: subir `__version__`, y luego `git tag v<versión>` +
+`git push origin v<versión>`; `.github/workflows/release.yml` corre todas
+las pruebas, construye la carpeta, la comprime en un `.zip`, arma el
+instalador y los adjunta (con `SHA256SUMS.txt`) a un GitHub Release.
 
 `requirements.txt` solo tiene lo necesario para ejecutar; `pytest` está en
 `requirements-dev.txt` y PyInstaller en `requirements-build.txt`.

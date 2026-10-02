@@ -18,6 +18,15 @@ carpeta...** (agrega recursivamente todo lo soportado dentro), o **Abrir
 URL...** (streams HTTP(S)/RTSP/RTMP/MMS/UDP). Arrastrar y soltar archivos o
 carpetas sobre la ventana también funciona.
 
+En un stream de red con duración conocida (un video por HTTP, no una
+radio en vivo), una franja translúcida sobre la barra de progreso muestra
+lo que libVLC ya tiene almacenado delante de la posición actual. libVLC no
+expone qué parte del archivo ya se descargó: la franja es lo que sabe, el
+llenado de su caché de red (`:network-caching`, ajustable en Abrir URL)
+según los eventos `Buffering`, así que mide como mucho el tamaño de esa
+caché (1 s por defecto) y vuelve a crecer desde la posición tras una
+búsqueda.
+
 ## Controles
 
 | Acción | Cómo |

@@ -18,10 +18,27 @@ libVLC (ctypes, vía python-vlc) -- decodifica y reproduce audio/video
 VLC media player (debe estar instalado aparte en la máquina; no se empaqueta)
 ```
 
-`MainWindow` (`player/main_window.py`) construye toda la interfaz (barra de
+`MainWindow` (`player/main_window.py`) arma la ventana (barra de
 controles, menús, dock de la playlist) y traduce cada acción del usuario en
-llamadas a un único `VLCPlayer`. No conoce nada de libVLC directamente más
-allá de `vlc.State` para leer el estado de reproducción.
+llamadas a un único `VLCPlayer`; no importa `vlc` (lee el estado como
+`backend.PlaybackState`). Delega en módulos propios:
+
+- `player/actions.py::ActionRegistry`: cada comando es un `QAction` con id,
+  texto, atajo y slot; el mismo objeto alimenta los menús, el menú
+  contextual del video, los botones (`setDefaultAction`), el controlador
+  de pantalla completa y Ayuda → Atajos de teclado.
+- `player/playlist_model.py` (`PlaylistModel` / `PlaylistFilterProxy` /
+  `PlaylistView`, modelo/vista de Qt) y `player/playlist_controller.py`
+  (`PlaylistController`: modelo + filtro + `PlaylistOrder`, fila actual y
+  de la sesión, metadatos en segundo plano, título del panel).
+- `player/preview_controller.py::PreviewController`: miniatura al pasar el
+  mouse por la barra (debounce, caché, captura).
+- `player/fullscreen.py::FullscreenMode`: entrar/salir de pantalla
+  completa, controlador flotante, temporizador de inactividad y cursor.
+- `player/widgets.py` (área de video, barra con marcadores y franja de lo
+  almacenado, ventanas superpuestas, controlador de pantalla completa),
+  `equalizer_dialog.py`, `power.py`, `theme.py`, `url_dialog.py`,
+  `single_instance.py`, `inputs.py`, `vlc_check.py`.
 
 `VLCPlayer` (`player/backend.py`) es la única clase que toca `python-vlc`.
 Mantiene su propio `vlc.Instance`/`vlc.MediaPlayer`, y los **recrea** cuando
@@ -50,6 +67,11 @@ tener VLC instalado.
 | Marcadores nombrados por archivo | `player/bookmarks.py`, `player/bookmarks_dialog.py` |
 | Lista de archivos/URLs abiertos recientemente | `player/recent_files.py` |
 | Orden de reproducción (secuencial/aleatorio) y detección de fallo | `player/playlist_order.py` |
+| Lista: modelo, filtro del buscador y vista reordenable | `player/playlist_model.py` |
+| Lista: agregar/quitar/mover/ordenar, sesión y metadatos en segundo plano | `player/playlist_controller.py::PlaylistController` |
+| Acciones con nombre (menús, menú contextual, botones, ayuda de atajos) | `player/actions.py::ActionRegistry` |
+| Miniatura de vista previa sobre la barra | `player/preview_controller.py::PreviewController` |
+| Pantalla completa (controlador flotante, inactividad, cursor) | `player/fullscreen.py::FullscreenMode` |
 | Lectura/escritura de `.m3u` | `player/m3u.py` |
 | JSON atómico con `.bak` para el estado del usuario | `player/jsonstore.py` |
 | Configuración persistente del usuario (API keys) | `player/config.py` |
@@ -58,8 +80,10 @@ tener VLC instalado.
 | Cliente de la API REST de OpenSubtitles | `player/opensubtitles.py` |
 | Diálogo de búsqueda/descarga de subtítulos online | `player/subtitle_dialog.py::OnlineSubtitleDialog` |
 | Ícono de la app (ventana + `.exe`) | `player/assets/icon.png`, `player/assets/icon.ico` |
-| Número de versión | `player.__version__` |
+| Número de versión (única fuente) | `player.__version__` |
 | Receta de PyInstaller para el ejecutable de Windows | `ReproductorMultimediaPro.spec` |
+| Recurso de versión del `.exe` (Propiedades → Detalles) | `packaging/version_resource.py` |
+| Release con etiqueta `v*` (CI, build, zip, instalador, GitHub Release) | `.github/workflows/release.yml` |
 
 ## Release
 
@@ -74,6 +98,12 @@ automáticamente tras cada push a `main`/`master` con el CI en verde vía
 `.github/workflows/build-exe.yml` (queda como artifact descargable en la
 ejecución correspondiente de GitHub Actions). Ver
 [docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md).
+Al subir una etiqueta `v<version>` (igual a `player.__version__`),
+`.github/workflows/release.yml` corre el CI completo y luego construye la
+carpeta onedir, el `.zip`, el instalador y `SHA256SUMS.txt`, y los publica
+como GitHub Release (todavía no se ejecutó en GitHub). El `.exe` lleva un
+recurso de versión generado de `player.__version__` (verificado en un
+build local, ver el workflow de empaquetado).
 No empaqueta VLC por defecto: la máquina que ejecute el `.exe` necesita VLC
 3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado; ver
 README). **El cambio a onedir, el recorte de módulos Qt, el instalador y la
@@ -349,15 +379,41 @@ creciendo.
   cambia levemente). Los valores guardados entre sesiones sí son exactos.
 - **Build sin probar**: onedir + instalador Inno Setup + `BUNDLE_VLC` (ver
   Release).
-- **`main_window.py` sigue siendo grande**: se separaron widgets,
-  ecualizador, energía, vista previa, tema, diálogo de URL, una sola
-  ventana y la expansión de entradas, pero la lista de reproducción sigue
-  siendo un `QListWidget` (no modelo/vista) y `MainWindow` todavía cablea
-  todo.
+- **`main_window.py` sigue siendo grande** (~2.200 líneas, el informe
+  apuntaba a ~400): ya están separados todos los módulos que listaba el
+  informe (acciones, lista modelo/vista + controlador, vista previa,
+  pantalla completa, widgets, ecualizador, energía, tema...), pero
+  `MainWindow` todavía arma los menús y cablea transporte, pistas,
+  subtítulos, A-B, marcadores y ajustes.
+- **Arrastrar para reordenar la lista no tiene prueba automática del
+  gesto en sí** (Qt `offscreen` sin mouse simulado): se prueba el mismo
+  camino que usa `dropEvent`; verificar a mano arrastrar una y varias
+  filas, con y sin texto en el buscador.
+- **La franja de lo almacenado de un stream es aproximada**: libVLC no
+  expone qué bytes ya bajó; se dibuja el llenado de su caché de red
+  (`:network-caching`, 1 s por defecto) delante de la posición, así que
+  nunca muestra más que ese tamaño. Falta verla con un stream real.
 - **Recorrer una carpeta grande** sigue siendo en el hilo de la UI (con
   orden natural); las duraciones sí se leen en segundo plano.
 
 ## Recently Fixed
+
+- **Tanda "importantes" del informe (2026-10-02).** La lista de
+  reproducción pasó de `QListWidget` a modelo/vista (`PlaylistModel` +
+  `PlaylistFilterProxy` + `PlaylistView`, con `PlaylistController`
+  uniendo modelo, filtro y `PlaylistOrder`), conservando arrastrar para
+  reordenar, buscador, marcador ▶, quitar la actual, duraciones y
+  etiquetas en segundo plano, total, menú contextual, aleatorio/repetir,
+  sesión y `.m3u8`; el menú contextual de la lista ahora se ubica en las
+  coordenadas del área visible (antes usaba las del widget, unos píxeles
+  corridas). Nuevos módulos `actions.py` (`ActionRegistry`),
+  `preview_controller.py` y `fullscreen.py` (refactor sin cambios de
+  comportamiento). Franja de lo almacenado en la barra para streams de
+  red. Versión única: `pyproject.toml` la toma de `player.__version__`
+  (y declara `packages = ["player"]`: con `packaging/` e `installer/` en
+  la raíz, el build de setuptools fallaba por "multiple top-level
+  packages"), el `.exe` lleva recurso de versión y hay un workflow de
+  release por etiqueta.
 
 - **Tanda P2 del informe de mejoras (2026-09-30).** URLs: cualquier
   `esquema://` salvo `file:` es una URL (antes rtsps/srt/rtp/ftp/smb llegaban

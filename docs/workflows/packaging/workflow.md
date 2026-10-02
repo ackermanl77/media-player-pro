@@ -18,6 +18,39 @@ quedaban restos tras un cierre forzado). Onedir arranca directo.
 > (no había Inno Setup en la máquina del build) y la verificación manual de
 > abajo (reproducir, "Abrir con", desinstalar).
 
+## Versión
+
+La única fuente es `player/__init__.py` (`__version__`). De ahí la toman:
+
+- `pyproject.toml` (`dynamic = ["version"]`, `[tool.setuptools.dynamic]`);
+- el recurso de versión del `.exe` (Propiedades → Detalles: nombre,
+  versión de archivo/producto, compañía, nombre original), que el spec
+  arma con `packaging/version_resource.py::build_version_info()`;
+- el instalador (`iscc /DAppVersion=...`, los workflows lo leen de
+  `player.__version__`) y el cliente de OpenSubtitles (`USER_AGENT`).
+
+Para publicar una versión: subir `__version__`, commit, y luego
+`git tag v<version>` + `git push origin v<version>`.
+
+> **Estado (2026-10-02):** el recurso de versión se verificó con un build
+> local (PyInstaller 6.22, Python 3.14): `ProductVersion`/`FileVersion`
+> 0.1.0, "Reproductor Multimedia Pro", idioma español. El workflow de
+> release no se ejecutó todavía en GitHub.
+
+## Release (etiqueta `v*`)
+
+`.github/workflows/release.yml`, al subir una etiqueta `v<version>`:
+
+1. corre el workflow CI completo (Ubuntu + Windows 3.12/3.14) como
+   `workflow_call`; si falla, no se construye nada;
+2. comprueba que la etiqueta sea `v` + `player.__version__`;
+3. construye la carpeta onedir con el spec (mismas dependencias fijas de
+   `constraints.txt`) y comprueba la versión del `.exe` construido;
+4. la comprime en `ReproductorMultimediaPro-<version>-windows-x64.zip`,
+   arma el instalador con Inno Setup y escribe `SHA256SUMS.txt`;
+5. crea el GitHub Release de esa etiqueta con los tres archivos (notas
+   generadas por GitHub).
+
 ## Build automático (CI)
 
 `.github/workflows/build-exe.yml` construye la carpeta y el instalador en
