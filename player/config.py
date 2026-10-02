@@ -28,3 +28,21 @@ def set_opensubtitles_api_key(key: str) -> None:
     data = _load()
     data["opensubtitles_api_key"] = key
     _save(data)
+
+
+def get_subtitle_languages() -> str:
+    """Idiomas para buscar subtitulos online ("es,en" por defecto)."""
+    from .opensubtitles import DEFAULT_LANGUAGES, normalize_languages
+
+    return normalize_languages(_load().get("subtitle_languages")) or DEFAULT_LANGUAGES
+
+
+def set_subtitle_languages(languages: str) -> str:
+    """Guarda los idiomas (normalizados); devuelve lo que quedo guardado."""
+    from .opensubtitles import DEFAULT_LANGUAGES, normalize_languages
+
+    value = normalize_languages(languages) or DEFAULT_LANGUAGES
+    data = _load()
+    data["subtitle_languages"] = value
+    _save(data)
+    return value

@@ -114,3 +114,38 @@ def test_download_subtitle_raises_when_no_link_in_response(monkeypatch, tmp_path
     monkeypatch.setattr(osub.requests, "post", lambda *a, **k: FakeResponse(200, {}))
     with pytest.raises(osub.OpenSubtitlesError):
         osub.download_subtitle("fake-key", 111, str(tmp_path / "sub.srt"))
+
+
+# ---------------------------------------------- respuestas raras (3.11)
+def test_malformed_results_are_skipped_not_raised(monkeypatch):
+    payload = {"data": [
+        {"attributes": {"files": [{"file_name": "sin_id.srt"}]}},            # sin file_id
+        {"attributes": {"files": "no-es-lista"}},
+        "no-es-dict",
+        {"attributes": {"language": "es", "files": [{"file_id": 7, "file_name": "a.ass"}],
+                        "download_count": "muchas"}},
+    ]}
+    monkeypatch.setattr(osub.requests, "get", lambda *a, **k: FakeResponse(200, payload))
+    results = osub.search_by_query("key", "x")
+    assert [(r["file_id"], r["download_count"], r["file_name"]) for r in results] == [(7, 0, "a.ass")]
+
+
+def test_non_json_response_raises_opensubtitles_error(monkeypatch):
+    class HtmlResponse(FakeResponse):
+        def json(self):
+            raise ValueError("no es JSON")
+
+    monkeypatch.setattr(osub.requests, "get", lambda *a, **k: HtmlResponse(200, None, text="<html>"))
+    with pytest.raises(osub.OpenSubtitlesError):
+        osub.search_by_hash("key", "abc")
+
+
+def test_download_reports_quota_and_extension_helpers(monkeypatch, tmp_path):
+    monkeypatch.setattr(osub.requests, "post", lambda *a, **k: FakeResponse(
+        200, {"link": "https://dl/x", "remaining": 17, "reset_time": "5 horas"}))
+    monkeypatch.setattr(osub.requests, "get", lambda *a, **k: FakeResponse(200, None, content=b"1\n"))
+    result = osub.download_subtitle_file("key", 1, str(tmp_path / "s.srt"))
+    assert (result.remaining, result.reset_time) == (17, "5 horas")
+    assert osub.subtitle_extension("Movie.ES.ass") == ".ass" and osub.subtitle_extension("x.zip") == ".srt"
+    assert osub.normalize_languages(" Es; EN ,pt-BR,es, xx-yyyyy1") == "es,en,pt-br"
+    assert osub.USER_AGENT.endswith(__import__("player").__version__)
