@@ -10,10 +10,13 @@ Antes era un `.exe` de un solo archivo ("onefile"): en cada arranque el
 bootloader extraía ~124 MB a `%TEMP%\_MEI...` y los borraba al salir (y
 quedaban restos tras un cierre forzado). Onedir arranca directo.
 
-> **Estado:** el cambio a onedir, el recorte de módulos Qt, el instalador y
-> la opción `BUNDLE_VLC` están escritos pero **todavía no se construyeron ni
-> probaron** (solo se validó la sintaxis). Hacer un build y la verificación
-> de abajo antes de distribuir.
+> **Estado (2026-10-01):** build onedir local verificado (Python 3.14,
+> versiones de `constraints.txt`): 77,9 MB / 201 archivos, arranca y carga el
+> VLC del sistema; el recorte de Qt ahorra ~40 MB (118,0 MB sin él). La
+> variante `BUNDLE_VLC=1` (+ `plugins.dat`) pesa 182,5 MB y arranca usando
+> solo el libVLC incluido. **Falta:** compilar e instalar el instalador
+> (no había Inno Setup en la máquina del build) y la verificación manual de
+> abajo (reproducir, "Abrir con", desinstalar).
 
 ## Build automático (CI)
 
@@ -60,8 +63,11 @@ embebido no usa (gui, lua, stream_out, ...) a `_internal\vlc\`. El runtime
 hook `packaging/rthook_bundled_vlc.py` apunta python-vlc ahí
 (`PYTHON_VLC_LIB_PATH`/`PYTHON_VLC_MODULE_PATH`) solo si el archivo existe —
 si no, se usa el VLC del sistema. Para no escanear cada plugin al arrancar,
-generar `plugins.dat` con `vlc-cache-gen.exe` sobre ese `plugins/` y pasarlo
-con `VLC_PLUGINS_CACHE`. Distribuir libVLC obliga a cumplir su LGPL
+generar `plugins.dat` **después** del build, sobre la carpeta ya copiada:
+`"C:\Program Files\VideoLAN\VLC\vlc-cache-gen.exe" dist\ReproductorMultimediaPro\_internal\vlc\plugins`
+(un `plugins.dat` generado antes no sirve: PyInstaller no conserva la fecha
+de los DLL y libVLC descarta las entradas que no coinciden; Inno Setup sí
+las conserva al instalar). Distribuir libVLC obliga a cumplir su LGPL
 (incluir su licencia y un enlace al código fuente de VLC).
 
 ## Instalador

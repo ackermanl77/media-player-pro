@@ -1,4 +1,4 @@
-; Instalador por usuario (sin permisos de administrador) de la carpeta onedir
+﻿; Instalador por usuario (sin permisos de administrador) de la carpeta onedir
 ; que genera ReproductorMultimediaPro.spec. Compilar con Inno Setup 6:
 ;   iscc /DAppVersion=0.1.0 installer\ReproductorMultimediaPro.iss
 ; (el workflow de build lo hace en windows-latest, donde iscc ya viene).
@@ -64,7 +64,7 @@ Root: HKCU; Subkey: "Software\{#AppKey}\Capabilities"; ValueType: string; ValueN
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppKey}\Capabilities"; Flags: uninsdeletevalue
 #define Ext(e) \
   'Root: HKCU; Subkey: "Software\' + AppKey + '\Capabilities\FileAssociations"; ValueType: string; ValueName: "' + e + '"; ValueData: "' + AppKey + '.Media"' + NewLine + \
-  'Root: HKCU; Subkey: "Software\Classes\' + e + '\OpenWithProgids"; ValueType: none; ValueName: "' + AppKey + '.Media"; Flags: uninsdeletevalue' + NewLine + \
+  'Root: HKCU; Subkey: "Software\Classes\' + e + '\OpenWithProgids"; ValueType: string; ValueName: "' + AppKey + '.Media"; ValueData: ""; Flags: uninsdeletevalue' + NewLine + \
   'Root: HKCU; Subkey: "Software\Classes\Applications\' + AppExe + '\SupportedTypes"; ValueType: string; ValueName: "' + e + '"; ValueData: ""'
 #emit Ext(".mp3")
 #emit Ext(".flac")

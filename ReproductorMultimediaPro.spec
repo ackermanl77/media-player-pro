@@ -56,11 +56,11 @@ if os.environ.get("BUNDLE_VLC") == "1":
             if name.endswith(".dll"):
                 binaries.append((os.path.join(src, name), os.path.join("vlc", "plugins", category)))
     # plugins.dat (cache de plugins): sin el, libVLC escanea cada DLL al
-    # arrancar. Lo genera scripts/build (vlc-cache-gen) tras el build; si ya
-    # existe uno correspondiente a este recorte, se incluye.
-    cache = os.environ.get("VLC_PLUGINS_CACHE")
-    if cache and os.path.exists(cache):
-        datas.append((cache, os.path.join("vlc", "plugins")))
+    # arrancar. Se genera DESPUES del build, sobre la carpeta ya copiada:
+    #   "%VLC_DIR%\vlc-cache-gen.exe" dist\ReproductorMultimediaPro\_internal\vlc\plugins
+    # (no se puede generar antes e incluirlo aqui: PyInstaller no conserva la
+    # fecha de los DLL copiados y libVLC descarta las entradas cuya fecha no
+    # coincide).
 
 a = Analysis(
     ["run.py"],
@@ -84,7 +84,11 @@ a = Analysis(
 # Ademas de los modulos, PyInstaller arrastra DLLs de Qt grandes que nunca se
 # cargan (~40 MB): opengl32sw.dll (OpenGL por software), Quick/Qml/Pdf, y
 # formatos de imagen que no se usan.
-_DROP_PREFIXES = ("opengl32sw", "qt6quick", "qt6qml", "qt6pdf", "qt6virtualkeyboard")
+# Qt6OpenGL.dll lo agrega el hook de PySide6 aunque ninguna DLL del paquete
+# lo importa; qtvirtualkeyboardplugin.dll depende de Qt6VirtualKeyboard (ya
+# descartado) y nunca podria cargarse.
+_DROP_PREFIXES = ("opengl32sw", "qt6quick", "qt6qml", "qt6pdf", "qt6virtualkeyboard",
+                  "qt6opengl", "qtvirtualkeyboard")
 _DROP_IMAGEFORMATS = ("qgif", "qicns", "qtga", "qtiff", "qwbmp", "qwebp", "qpdf")
 
 
@@ -93,6 +97,10 @@ def _keep_binary(entry):
     if name.startswith(_DROP_PREFIXES):
         return False
     if "imageformats" in entry[0].replace("\\", "/").lower() and name.startswith(_DROP_IMAGEFORMATS):
+        return False
+    # Con BUNDLE_VLC, el analisis de dependencias de los plugins agrega una
+    # segunda copia de libvlccore.dll en la raiz (~2.7 MB); la buena es vlc\.
+    if name == "libvlccore.dll" and os.path.dirname(entry[0]).replace("\\", "/").lower() != "vlc":
         return False
     return True
 
