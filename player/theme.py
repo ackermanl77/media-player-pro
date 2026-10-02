@@ -39,6 +39,9 @@ LIVE_LABEL = "EN VIVO"
 LOOP_MARKER_COLOR = QColor("#ff8c3c")
 BOOKMARK_MARKER_COLOR = QColor("#ffd23c")
 CHAPTER_MARKER_COLOR = QColor("#6ab0ff")
+# Tramo ya almacenado de un stream de red (PositionSlider.set_buffered_range):
+# translucido para que se vea sobre la ranura clara u oscura.
+BUFFERED_RANGE_COLOR = QColor(128, 160, 255, 110)
 
 DARK_COLORS = {
     "window": "#1e1e1e",

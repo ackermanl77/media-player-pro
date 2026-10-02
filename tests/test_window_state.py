@@ -99,7 +99,7 @@ def test_status_messages_go_to_the_osd_while_fullscreen(make_window):
 def test_osd_and_controls_live_in_top_level_windows_above_the_video(make_window):
     window = make_window()
     window.show()
-    for overlay in (window._osd_overlay, window._controls_overlay):
+    for overlay in (window._osd_overlay, window.fullscreen.overlay):
         # No es hijo de video_frame (cuya superficie tapa libVLC) sino una
         # ventana propia, duena la ventana principal.
         assert overlay.isWindow()
@@ -130,14 +130,14 @@ def test_overlays_hide_when_the_app_is_deactivated_or_minimized(make_window):
     window.toggle_fullscreen()
     try:
         window._show_osd("x")
-        assert window._controls_overlay.isVisible() and window._osd_overlay.isVisible()
+        assert window.fullscreen.overlay.isVisible() and window._osd_overlay.isVisible()
         window._on_application_state_changed(Qt.ApplicationState.ApplicationInactive)
-        assert window._controls_overlay.isHidden() and window._osd_overlay.isHidden()
-        window._on_fullscreen_mouse_activity()
-        assert window._controls_overlay.isVisible()
+        assert window.fullscreen.overlay.isHidden() and window._osd_overlay.isHidden()
+        window.fullscreen.on_mouse_activity()
+        assert window.fullscreen.overlay.isVisible()
         window.showMinimized()
         window.changeEvent(QEvent(QEvent.Type.WindowStateChange))
-        assert window._controls_overlay.isHidden()
+        assert window.fullscreen.overlay.isHidden()
     finally:
         window.showNormal()
         window._exit_fullscreen()
@@ -148,11 +148,11 @@ def test_cursor_hides_when_idle_in_fullscreen_and_comes_back_on_activity(make_wi
     window.show()
     window.toggle_fullscreen()
     try:
-        window._fullscreen_idle_timer.timeout.emit()
+        window.fullscreen.idle_timer.timeout.emit()
         assert window.video_frame.cursor().shape() == Qt.CursorShape.BlankCursor
-        window._on_fullscreen_mouse_activity()
+        window.fullscreen.on_mouse_activity()
         assert window.video_frame.cursor().shape() != Qt.CursorShape.BlankCursor
-        window._fullscreen_idle_timer.timeout.emit()
+        window.fullscreen.idle_timer.timeout.emit()
     finally:
         window._exit_fullscreen()
     assert window.video_frame.cursor().shape() != Qt.CursorShape.BlankCursor
@@ -247,7 +247,7 @@ def test_playlist_and_current_item_are_restored_without_autoplay(make_window, mo
     assert again.playlist_entries() == [os.path.normpath("C:/fake/a.mp3"), os.path.normpath("C:/fake/b.mkv"),
                                         "https://example.com/radio"]
     assert again.current_index == -1 and again.player.is_idle()  # no arranca solo
-    assert again.playlist_widget.currentRow() == 1
+    assert again.playlist_view.current_source_row() == 1
     played = []
     monkeypatch.setattr(again, "play_index", lambda index, user=True: played.append(index))
     again.toggle_play_pause()
@@ -279,7 +279,7 @@ def test_turning_off_restore_session_clears_it(make_window):
     window.close()
     assert settings_module.load_session().entries == []
     again = make_window()
-    assert again.playlist_widget.count() == 0
+    assert again.playlist.count() == 0
     assert not again.act_restore_session.isChecked()
 
 

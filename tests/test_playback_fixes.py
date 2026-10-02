@@ -175,7 +175,7 @@ def test_bookmarks_are_read_once_per_track_not_every_tick(window, monkeypatch):
 # -------------------------------------- 7. teclado y quitar varios
 def test_arrow_keys_go_to_a_focused_playlist_not_to_the_volume_shortcut(window):
     up = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
-    assert window.eventFilter(window.playlist_widget, up) is True
+    assert window.eventFilter(window.playlist_view, up) is True
     assert up.isAccepted()
     # Fuera de la playlist, el atajo de volumen sigue funcionando.
     up2 = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
@@ -191,7 +191,7 @@ def test_enter_on_the_playlist_plays_the_item(window):
     played = []
     window.play_index = lambda index, user=True: played.append(index)
     window.add_files_to_playlist(["C:/fake/a.mp3", "C:/fake/b.mp3"])
-    window.playlist_widget.itemActivated.emit(window.playlist_widget.item(1))
+    window.playlist_view.activated.emit(window.playlist_view.view_index_for_source_row(1))
     assert played == [1]
 
 
@@ -199,10 +199,10 @@ def test_delete_removes_every_selected_row_and_keeps_current_in_sync(window):
     window.add_files_to_playlist([f"C:/fake/{n}.mp3" for n in "abcde"])
     window.current_index = 3
     window.order.jump_to(3)
-    window.playlist_widget.item(0).setSelected(True)
-    window.playlist_widget.item(2).setSelected(True)
+    window.playlist_view.set_source_rows_selected([0, 2])
     window.remove_selected_from_playlist()
-    names = [window.playlist_widget.item(i).text() for i in range(window.playlist_widget.count())]
+    model = window.playlist.model
+    names = [model.index(i).data() for i in range(model.rowCount())]
     assert [n.split()[-1] for n in names] == ["b.mp3", "d.mp3", "e.mp3"]
     assert window.current_index == 1
     assert window.order.current == 1 and window.order.count == 3
@@ -212,8 +212,8 @@ def test_delete_removes_every_selected_row_and_keeps_current_in_sync(window):
 def test_playlist_entries_are_normalized_on_entry(window, headless):
     raw = str(headless).replace("\\", "/") + "/dir/f.mkv"
     window.add_files_to_playlist([raw, "http://example.com/s"])
-    assert window.playlist_widget.item(0).data(Qt.ItemDataRole.UserRole) == os.path.join(str(headless), "dir", "f.mkv")
-    assert window.playlist_widget.item(1).data(Qt.ItemDataRole.UserRole) == "http://example.com/s"
+    assert window.playlist.path(0) == os.path.join(str(headless), "dir", "f.mkv")
+    assert window.playlist.path(1) == "http://example.com/s"
 
 
 # ------------------------------------------ 10. recrear el Instance

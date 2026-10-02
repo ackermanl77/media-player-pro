@@ -189,16 +189,16 @@ def test_hover_over_an_audio_track_shows_only_the_time(window):
     window.add_files_to_playlist(["C:/fake/song.mp3"])
     window.current_index = 0
     window.player.get_length_ms = lambda: 60_000
-    window._pending_hover_fraction = 0.5
-    window._pending_hover_pos = QPoint(100, 100)
-    window._show_hover_preview()
+    window.preview.pending_fraction = 0.5
+    window.preview.pending_pos = QPoint(100, 100)
+    window.preview.show_preview()
     try:
-        assert window._preview_time_label.text() == "00:30"
-        assert window._preview_thumbnail_label.isHidden()
+        assert window.preview.time_label.text() == "00:30"
+        assert window.preview.thumbnail_label.isHidden()
         assert not window.player.has_preview_player()
-        assert not window._capture_timer.isActive()
+        assert not window.preview.capture_timer.isActive()
     finally:
-        window._hide_hover_preview()
+        window.preview.hide()
 
 
 def test_hover_serves_cached_thumbnails_without_seeking(window):
@@ -206,45 +206,45 @@ def test_hover_serves_cached_thumbnails_without_seeking(window):
     window.current_index = 0
     window.player.get_length_ms = lambda: 6_000
     pixmap = QPixmap(160, 90)
-    window._thumbnail_cache.put(VIDEO, 0.25, pixmap)
+    window.preview.cache.put(VIDEO, 0.25, pixmap)
     seeks = []
     window.player.seek_preview = lambda f: seeks.append(f)
-    window._pending_hover_fraction = 0.251
-    window._pending_hover_pos = QPoint(100, 100)
-    window._show_hover_preview()
+    window.preview.pending_fraction = 0.251
+    window.preview.pending_pos = QPoint(100, 100)
+    window.preview.show_preview()
     try:
         assert seeks == []
-        assert not window._capture_timer.isActive()
-        assert not window._preview_thumbnail_label.pixmap().isNull()
+        assert not window.preview.capture_timer.isActive()
+        assert not window.preview.thumbnail_label.pixmap().isNull()
     finally:
-        window._hide_hover_preview()
+        window.preview.hide()
 
 
 def test_cache_miss_clears_the_old_frame_and_polls_for_the_new_one(window):
     window.add_files_to_playlist([VIDEO])
     window.current_index = 0
     window.player.get_length_ms = lambda: 6_000
-    window._ensure_preview_popup()
-    window._preview_thumbnail_label.setPixmap(QPixmap(160, 90))  # fotograma "viejo"
+    window.preview.ensure_popup()
+    window.preview.thumbnail_label.setPixmap(QPixmap(160, 90))  # fotograma "viejo"
     seeks = []
     window.player.load_preview_media = lambda p: True
     window.player.preview_current_path = lambda: VIDEO
     window.player.seek_preview = lambda f: seeks.append(f)
-    window._pending_hover_fraction = 0.75
-    window._pending_hover_pos = QPoint(100, 100)
-    window._show_hover_preview()
+    window.preview.pending_fraction = 0.75
+    window.preview.pending_pos = QPoint(100, 100)
+    window.preview.show_preview()
     try:
         assert seeks == [0.75]
-        assert window._preview_thumbnail_label.pixmap().isNull()  # sin fotograma viejo
-        assert window._capture_timer.isActive()
-        assert window._capture_timer.interval() == preview_module.CAPTURE_POLL_MS
+        assert window.preview.thumbnail_label.pixmap().isNull()  # sin fotograma viejo
+        assert window.preview.capture_timer.isActive()
+        assert window.preview.capture_timer.interval() == preview_module.CAPTURE_POLL_MS
         # Se rinde a los ~400 ms en vez de esperar para siempre.
         window.player.take_preview_snapshot = lambda *a, **k: False
         for _ in range(preview_module.CAPTURE_TIMEOUT_MS // preview_module.CAPTURE_POLL_MS + 1):
-            window._poll_hover_snapshot()
-        assert not window._capture_timer.isActive()
+            window.preview.poll_snapshot()
+        assert not window.preview.capture_timer.isActive()
     finally:
-        window._hide_hover_preview()
+        window.preview.hide()
 
 
 def test_preview_player_is_released_after_idle(window):
@@ -252,8 +252,8 @@ def test_preview_player_is_released_after_idle(window):
     window.player.is_preview_warmed_up = lambda: True
     released = []
     window.player.release_preview_player = lambda: released.append(True)
-    window._on_slider_hover_ended()
-    assert window._preview_idle_timer.isActive()
-    assert window._preview_idle_timer.interval() == preview_module.IDLE_RELEASE_MS
+    window.preview.on_hover_ended()
+    assert window.preview.idle_timer.isActive()
+    assert window.preview.idle_timer.interval() == preview_module.IDLE_RELEASE_MS
     window.player._preview_player = None
-    window._preview_idle_timer.stop()
+    window.preview.idle_timer.stop()

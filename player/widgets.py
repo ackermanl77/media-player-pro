@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QStyle,
     QStyleOptionSlider,
+    QStylePainter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -145,7 +146,9 @@ class PositionSlider(QSlider):
     nombrados, capitulos) sobre la barra, con forma distinta por tipo (no
     solo color): A/B = corchete, marcador = punto, capitulo = raya. Emite
     hovered(fraccion, posicion_global) mientras el mouse se mueve encima
-    (miniatura de vista previa).
+    (miniatura de vista previa). Para streams de red, ademas, una franja
+    translucida sobre la ranura muestra el tramo ya almacenado delante de
+    la posicion (set_buffered_range).
 
     Un clic izquierdo fuera del tirador salta ahi y sigue como arrastre,
     con cualquier estilo: con windowsvista/Fusion un clic solo avanzaba una
@@ -157,6 +160,7 @@ class PositionSlider(QSlider):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         self._markers = []  # lista de (fraccion 0..1, tipo)
+        self._buffered = None  # (inicio, fin) en fracciones 0..1, o None
         self.setMouseTracking(True)
 
     def markers(self) -> list:
@@ -168,6 +172,52 @@ class PositionSlider(QSlider):
             return  # sin repintar 4 veces por segundo si nada cambio
         self._markers = markers
         self.update()
+
+    def buffered_range(self):
+        return self._buffered
+
+    def set_buffered_range(self, start=None, end=None):
+        """Tramo almacenado (fracciones 0..1); None/None lo oculta."""
+        if start is None or end is None:
+            buffered = None
+        else:
+            start, end = max(0.0, min(1.0, start)), max(0.0, min(1.0, end))
+            buffered = (round(start, 4), round(end, 4)) if end > start else None
+        if buffered == self._buffered:
+            return
+        self._buffered = buffered
+        self.update()
+
+    def _x_for(self, fraction: float) -> int:
+        handle_width = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
+        usable_width = max(0, self.width() - handle_width)
+        return handle_width // 2 + int(max(0.0, min(1.0, fraction)) * usable_width)
+
+    def buffered_rect(self) -> QRect:
+        """Rectangulo de la franja de lo almacenado (vacio si no hay)."""
+        if self._buffered is None:
+            return QRect()
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, self
+        )
+        height = max(4, min(groove.height(), 6))
+        x0, x1 = self._x_for(self._buffered[0]), self._x_for(self._buffered[1])
+        return QRect(x0, groove.center().y() - height // 2 + 1, max(1, x1 - x0), height)
+
+    def _paint_with_buffered_range(self):
+        """Ranura, franja de lo almacenado y tirador, en ese orden (la
+        franja queda debajo del tirador)."""
+        painter = QStylePainter(self)
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        option.subControls = QStyle.SubControl.SC_SliderGroove
+        painter.drawComplexControl(QStyle.ComplexControl.CC_Slider, option)
+        painter.fillRect(self.buffered_rect(), theme.BUFFERED_RANGE_COLOR)
+        option.subControls = QStyle.SubControl.SC_SliderHandle
+        painter.drawComplexControl(QStyle.ComplexControl.CC_Slider, option)
+        painter.end()
 
     def _fraction_at(self, x: int) -> float:
         handle_width = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
@@ -198,16 +248,17 @@ class PositionSlider(QSlider):
         super().leaveEvent(event)
 
     def paintEvent(self, event):
-        super().paintEvent(event)
+        if self._buffered is None or not self.isEnabled():
+            super().paintEvent(event)
+        else:
+            self._paint_with_buffered_range()
         if not self._markers:
             return
-        handle_width = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
-        usable_width = max(0, self.width() - handle_width)
         bottom = self.height() - 1
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for fraction, kind in self._markers:
-            x = handle_width // 2 + int(max(0.0, min(1.0, fraction)) * usable_width)
+            x = self._x_for(fraction)
             color = _MARKER_COLORS.get(kind, theme.BOOKMARK_MARKER_COLOR)
             pen = QPen(color)
             if kind == MARKER_BOOKMARK:

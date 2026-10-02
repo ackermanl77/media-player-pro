@@ -262,9 +262,9 @@ def test_open_url_dialog_prefills_from_the_clipboard_and_validates(qapp):
 def test_new_shortcuts_and_menus_exist(window):
     keys = {a.shortcut().toString() for a in window.actions()}
     assert {"S", "J", "K", "[", "]", "=", "Ctrl+G", "Ctrl+Shift+S", "PgUp", "PgDown", "Home", "F1"} <= keys
-    extra = {seq.toString() for _d, seq in window._extra_shortcuts}
+    extra = {seq.toString() for _d, seq in window.action_registry.extra_shortcuts}
     assert {"Shift+Right", "Alt+Left", "Ctrl+Alt+Right"} <= extra
-    assert len(window._extra_shortcuts) >= 17  # incluye las 6 teclas multimedia
+    assert len(window.action_registry.extra_shortcuts) >= 17  # incluye las 6 teclas multimedia
     menus = [a.text() for a in window.menuBar().actions()]
     assert "A&udio" in menus and "&Archivo" in menus  # Alt+A ya no es ambiguo
     rows = window.shortcut_rows()
@@ -339,12 +339,12 @@ def test_drag_reorder_keeps_the_playing_row_and_shuffle_in_sync(window):
     window.add_files_to_playlist([f"C:/fake/{n}.mp3" for n in "abcd"])
     window._set_current_index(1)
     window.order.jump_to(1)
-    lw = window.playlist_widget
-    lw.insertItem(3, lw.takeItem(1))  # lo que hace un arrastre interno
-    window._sync_after_reorder()
+    window.playlist_view.rowsDropped.emit([1], 4)  # lo que emite soltar "b" al final
     assert window.current_index == 3 and window.order.current == 3
-    assert lw.item(3).text().startswith("▶") and lw.item(3).font().bold()
-    assert not lw.item(1).text().startswith("▶")
+    model = window.playlist.model
+    assert [os.path.basename(p) for p in window.playlist_entries()] == ["a.mp3", "c.mp3", "d.mp3", "b.mp3"]
+    assert model.index(3).data().startswith("▶") and model.index(3).data(Qt.ItemDataRole.FontRole).bold()
+    assert not model.index(1).data().startswith("▶") and model.index(1).data(Qt.ItemDataRole.FontRole) is None
 
 
 def test_removing_the_playing_row_then_next_plays_the_row_that_took_its_place(window):
@@ -362,7 +362,7 @@ def test_filter_sort_and_remove_unavailable(window, tmp_path):
     real = _wav(tmp_path / "Pista 10.wav", 1)
     window.add_files_to_playlist(["C:/fake/Pista 2.mp3", real, "C:/fake/otra.mp3"])
     window.playlist_filter.setText("pista")
-    assert [window.playlist_widget.item(r).isHidden() for r in range(3)] == [False, False, True]
+    assert window.playlist.visible_rows() == [0, 1]
     played = []
     window.play_index = lambda index, user=True: played.append(index)
     window._play_first_filtered()
@@ -378,8 +378,9 @@ def test_filter_sort_and_remove_unavailable(window, tmp_path):
 def test_durations_are_read_in_the_background_and_totalled(window, tmp_path):
     a, b = _wav(tmp_path / "a.wav", 2), _wav(tmp_path / "b.wav", 3)
     window.add_files_to_playlist([a, b])
-    assert _pump(lambda: window.playlist_widget.item(1).text().endswith("00:03"), timeout_s=10)
-    assert window.playlist_widget.item(0).text().endswith("00:02")
+    model = window.playlist.model
+    assert _pump(lambda: model.index(1).data().endswith("00:03"), timeout_s=10)
+    assert model.index(0).data().endswith("00:02")
     assert window.playlist_dock.windowTitle() == "Lista de reproducción (2 elementos) — 00:05"
 
 
@@ -393,7 +394,7 @@ def test_open_paths_and_instance_messages_expand_folders(window, tmp_path):
     assert played == [0]  # no sonaba nada: arranca igual
     window.current_index = 0
     window.handle_instance_message("enqueue", ["https://x/radio"])
-    assert played == [0] and window.playlist_widget.count() == 2
+    assert played == [0] and window.playlist.count() == 2
     window.handle_instance_message("open", ["https://x/otra"])
     assert played == [0, 2]
 
@@ -479,3 +480,47 @@ def test_mute_from_stopped_state_toggles_and_shows_osd(window):
     assert window._osd_label.text() == "Silencio: sí"
     window.toggle_mute()
     assert not window.player.is_muted()
+
+
+# ------------------------------------------- 4.7 tramo almacenado de streams
+def test_buffered_range_is_clamped_and_painted_under_the_handle(window):
+    slider = window.position_slider
+    slider.resize(400, 24)
+    slider.set_buffered_range(-0.5, 0.25)
+    assert slider.buffered_range() == (0.0, 0.25)
+    rect = slider.buffered_rect()
+    assert not rect.isEmpty() and rect.left() >= 0 and rect.right() < slider.width()
+    assert not slider.grab().isNull()  # pinta ranura + franja + tirador sin fallar
+    slider.set_buffered_range(0.6, 0.4)  # vacio: se oculta
+    assert slider.buffered_range() is None and slider.buffered_rect().isEmpty()
+    slider.set_buffered_range(0.1, 0.2)
+    slider.set_buffered_range(None, None)
+    assert slider.buffered_range() is None
+
+
+def test_buffered_range_follows_the_network_cache_of_a_seekable_stream(window):
+    window.add_files_to_playlist(["https://example.com/video.mp4", "C:/fake/local.mkv"])
+    window.current_index = 0
+    window.player.network_caching_ms = 2000
+    window.player.get_length_ms = lambda: 20_000
+    window.player.get_time_ms = lambda: 5_000
+    window.player.get_position = lambda: 0.25
+    window.player.is_live_stream = lambda: False
+    window._on_buffering(window.player.generation, 50.0)
+    window.update_ui()
+    expected = (0.25, 0.3)  # 5 s + 50 % de 2 s, sobre 20 s
+    assert window.position_slider.buffered_range() == expected
+    assert window.fullscreen_controller.slider.buffered_range() == expected
+    window._on_buffering(window.player.generation, 100.0)
+    window.update_ui()
+    assert window.position_slider.buffered_range() == (0.25, 0.35)
+    # Un archivo local no muestra franja.
+    window.current_index = 1
+    window.update_ui()
+    assert window.position_slider.buffered_range() is None
+    # Un stream en vivo tampoco (la barra esta deshabilitada).
+    window.current_index = 0
+    window.player.is_live_stream = lambda: True
+    window.update_ui()
+    assert window.position_slider.buffered_range() is None
+    window._stall_timer.stop()

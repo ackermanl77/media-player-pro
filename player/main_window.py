@@ -12,7 +12,6 @@ from PySide6.QtGui import (
     QIcon,
     QKeySequence,
     QPalette,
-    QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -26,7 +25,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -40,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, theme
+from .actions import ActionRegistry
 from .backend import FINISHED_STATES, MediaInfoProbe, PlaybackState, VLCPlayer, libvlc_version
 from .bookmarks import add_bookmark, get_bookmarks
 from .bookmarks_dialog import BookmarksDialog
@@ -48,26 +47,20 @@ from .formats import (
     build_open_filter,
     format_rate,
     format_time,
-    is_audio_file,
     is_url,
-    normalize_path,
     parse_time_input,
     path_key,
     snapshot_file_name,
 )
-from .inputs import expand_inputs, filter_dropped, natural_sort_key, read_playlist_file, scan_folder
+from .fullscreen import FullscreenMode
+from .inputs import expand_inputs, filter_dropped, read_playlist_file, scan_folder
 from .logs import current_log_dir
 from .m3u import format_m3u
-from .playlist_order import PlaylistOrder, playback_failed
+from .playlist_controller import PlaylistController
+from .playlist_model import PlaylistView, display_name
+from .playlist_order import playback_failed
 from .power import POWER_ACTIONS, PowerCountdownDialog, run_power_action
-from .preview import (
-    CAPTURE_POLL_MS,
-    CAPTURE_TIMEOUT_MS,
-    IDLE_RELEASE_MS,
-    ThumbnailCache,
-    new_snapshot_path,
-    remove_quietly,
-)
+from .preview_controller import PreviewController
 from .recent_files import add_recent_file, clear_recent_files, get_recent_files
 from .resume import clear_position, get_saved_position_ms, save_position
 from .settings import (
@@ -91,9 +84,7 @@ from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist
     MARKER_BOOKMARK,
     MARKER_CHAPTER,
     MARKER_LOOP,
-    FullscreenController,
     OverlayWindow,
-    PlaylistWidget,
     PositionSlider,
     VideoFrame,
     floating_controls_rect,
@@ -109,12 +100,8 @@ UI_TICK_MS = 500          # etiquetas y barra; las transiciones llegan por event
 AB_LOOP_TICK_MS = 50      # mientras hay un tramo A-B activo
 STREAM_STALL_TIMEOUT_MS = 15_000
 STREAM_VISUALIZER_DELAY_MS = 1500
-METADATA_BATCH = 4
 REPEAT_LABELS = {"none": "No repetir", "all": "Repetir todo", "one": "Repetir uno"}
 AUDIO_DELAY_STEP_MS = 50
-FULLSCREEN_CONTROLLER_MAX_WIDTH = 960
-FULLSCREEN_CONTROLLER_MARGIN = 24
-ITEM_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 _FILTER_EDIT_KEYS_WITH_CTRL = frozenset({
@@ -166,14 +153,12 @@ class MainWindow(QMainWindow):
         # que _create_instance ya arranque con volumen/velocidad/EQ.
         self.settings = load_settings()
         self._restored_geometry = False
-        # Fila de la sesion restaurada que estaba sonando al cerrar: se
-        # selecciona pero no se reproduce sola; Reproducir la retoma (y
-        # resume.py la posicion). -1 = ninguna.
-        self._session_row = -1
-        self.current_index = -1
+        # Lista de reproduccion: modelo, filtro, orden (aleatorio/repetir),
+        # fila actual y de la sesion, duraciones y etiquetas en segundo
+        # plano (ver playlist_controller.py).
+        self.playlist = PlaylistController(probe_factory=MediaInfoProbe, parent=self)
         self.dragging_slider = False
         self.repeat_mode = "none"  # none | one | all
-        self.order = PlaylistOrder()
         self._rate = 1.0
         self._advancing = False
         # Generacion (VLCPlayer.generation) cuyo fin ya se proceso: un
@@ -189,68 +174,34 @@ class MainWindow(QMainWindow):
         # en cada tick era innecesario (ver _current_bookmarks).
         self._bookmarks_cache = None
         self._chapters_cache = None  # (generacion, [(inicio, duracion, nombre)])
-        self._dock_was_visible = True
         self.equalizer_dialog = None
         self.bookmarks_dialog = None
         self.loop_point_a = None
         self.loop_point_b = None
         self.on_finish_action = "none"
         self._power_dialog = None
-        # Datos por entrada de la lista (claves = path_key): duracion
-        # conocida, (artista, titulo) y titulo ICY de las radios.
-        self._known_durations = {}
-        self._known_tags = {}
-        self._icy_titles = {}
-        self._next_item_id = 0
-        self._row_ids = []
         # Subtitulos descargados para un archivo que ya no era el actual:
         # se cargan la proxima vez que se abra (ver _on_online_subtitle_ready).
         self._pending_subtitles = {}
         self._stream_visualizer_gen = -1
         self._stall_time_ms = 0
         self._stall_box = None
-
-        # Duraciones y etiquetas en segundo plano (ver _probe_next_metadata).
-        self._metadata_queue = []
-        self._metadata_probe = MediaInfoProbe(self._on_metadata_parsed)
-        self._metadata_timer = QTimer(self)
-        self._metadata_timer.setSingleShot(True)
-        self._metadata_timer.setInterval(200)
-        self._metadata_timer.timeout.connect(self._probe_next_metadata)
+        # Llenado (0-100 %) de la cache de red de libVLC, del ultimo evento
+        # Buffering del stream actual (ver _buffered_fractions).
+        self._buffer_fill = 0.0
 
         # Vista previa en miniatura al pasar el mouse por la barra de
-        # progreso (ver _on_slider_hovered / _show_hover_preview).
-        self._preview_popup = None
+        # progreso (ver preview_controller.py).
         self._preview_video_widget = None
-        self._pending_hover_fraction = None
-        self._pending_hover_pos = None
-        self._preview_hover_timer = QTimer(self)
-        self._preview_hover_timer.setSingleShot(True)
-        self._preview_hover_timer.setInterval(300)  # debounce: espera a que el mouse se detenga
-        self._preview_hover_timer.timeout.connect(self._show_hover_preview)
-        self._preview_snapshot_path = new_snapshot_path()
-        self._thumbnail_cache = ThumbnailCache()
-        self._capture_attempts = 0
-        self._capture_request = None  # (ruta, fraccion) que se esta capturando
-        self._capture_timer = QTimer(self)
-        self._capture_timer.setInterval(CAPTURE_POLL_MS)
-        self._capture_timer.timeout.connect(self._poll_hover_snapshot)
-        self._preview_idle_timer = QTimer(self)
-        self._preview_idle_timer.setSingleShot(True)
-        self._preview_idle_timer.setInterval(IDLE_RELEASE_MS)
-        self._preview_idle_timer.timeout.connect(self.player.release_preview_player)
+        self.preview = PreviewController(
+            self.player, self._current_path_or_none, lambda ms: self.chapter_name_at(ms),
+            lambda: self.devicePixelRatioF(), parent=self,
+        )
 
         # OSD (on-screen display) transitoria sobre el video -- ver _show_osd.
         self._osd_timer = QTimer(self)
         self._osd_timer.setSingleShot(True)
         self._osd_timer.setInterval(1500)
-
-        # Controlador de pantalla completa -- ver _on_fullscreen_mouse_activity.
-        self._fullscreen_idle_timer = QTimer(self)
-        self._fullscreen_idle_timer.setSingleShot(True)
-        self._fullscreen_idle_timer.setInterval(2500)
-        self._fullscreen_idle_timer.timeout.connect(self._hide_floating_controls)
-        self._status_bar_was_visible = True
 
         # Guardado de la playlist con debounce (ver _schedule_session_save).
         self._session_save_timer = QTimer(self)
@@ -272,13 +223,15 @@ class MainWindow(QMainWindow):
 
         self.setAcceptDrops(True)
 
-        self._extra_shortcuts = []  # (descripcion, QKeySequence) de los QShortcut
+        self.action_registry = ActionRegistry(self)
         self._build_actions()
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
-        self._register_shortcut_actions()
+        self.action_registry.register_shortcuts_on_owner()
         self._refresh_icons()
+        self.playlist.contentsChanged.connect(self._schedule_session_save)
+        self.playlist.summaryChanged.connect(self.playlist_dock.setWindowTitle)
 
         self._osd_label.hide()
         self._osd_timer.timeout.connect(self._hide_osd)
@@ -291,7 +244,7 @@ class MainWindow(QMainWindow):
         # para que mover el mouse sobre los propios controles flotantes
         # tambien cuente como actividad y no los oculte mientras se usan.
         QApplication.instance().installEventFilter(self)
-        self.video_frame.mouseMoved.connect(self._on_fullscreen_mouse_activity)
+        self.video_frame.mouseMoved.connect(self.fullscreen.on_mouse_activity)
 
         self._connect_player_events()
 
@@ -404,12 +357,34 @@ class MainWindow(QMainWindow):
             if folder:
                 self.settings.last_open_dir = folder
 
+    # -- lista: atajos al controlador -------------------------------------
+    @property
+    def current_index(self) -> int:
+        """Fila de la lista que suena (-1 = ninguna)."""
+        return self.playlist.current_index
+
+    @current_index.setter
+    def current_index(self, row: int):
+        self.playlist.current_index = row
+
+    @property
+    def order(self):
+        return self.playlist.order
+
+    @property
+    def _session_row(self) -> int:
+        """Fila de la sesion restaurada que estaba sonando al cerrar: se
+        selecciona pero no se reproduce sola; Reproducir la retoma (y
+        resume.py la posicion). -1 = ninguna."""
+        return self.playlist.session_row
+
+    @_session_row.setter
+    def _session_row(self, row: int):
+        self.playlist.session_row = row
+
     # -- sesion (playlist) -----------------------------------------------
     def playlist_entries(self) -> list:
-        return [
-            self.playlist_widget.item(i).data(Qt.ItemDataRole.UserRole)
-            for i in range(self.playlist_widget.count())
-        ]
+        return self.playlist.entries()
 
     def current_session(self) -> Session:
         current = self.current_index if self.current_index != -1 else self._session_row
@@ -432,47 +407,98 @@ class MainWindow(QMainWindow):
         self.add_files_to_playlist(session.entries)
         if session.current_index != -1:
             self._session_row = session.current_index
-            self.playlist_widget.setCurrentRow(session.current_index)
+            self.playlist_view.set_current_source_row(session.current_index)
         # Recien restaurada, la sesion en disco ya es identica.
         self._session_save_timer.stop()
 
     # ------------------------------------------------------------ acciones
-    def _action(self, text, slot=None, shortcut=None, checkable=False, tooltip=None, name=None):
-        action = QAction(text, self)
-        if shortcut is not None:
-            action.setShortcut(QKeySequence(shortcut))
-        action.setCheckable(checkable)
-        if tooltip:
-            action.setToolTip(tooltip)
-        if slot is not None:
-            action.triggered.connect(slot)
-        if name:
-            action.setObjectName(name)
-        return action
-
     def _build_actions(self):
-        """Acciones compartidas por menus, botones (setDefaultAction), menu
-        contextual del video y controlador de pantalla completa: una sola
-        fuente para texto, atajo y estado (marcado/no marcado)."""
-        A = self._action
-        self.act_play_pause = A("Reproducir/Pausar", self.toggle_play_pause, "Space",
-                                tooltip="Reproducir/Pausar (Espacio)", name="play_pause")
-        self.act_stop = A("Detener", self.stop, "S", tooltip="Detener (S)", name="stop")
-        self.act_next = A("Pista siguiente", lambda: self.play_next(auto=False), "Ctrl+Right",
-                          tooltip="Pista siguiente (Ctrl+Derecha)", name="next")
-        self.act_prev = A("Pista anterior", self.play_previous, "Ctrl+Left",
-                          tooltip="Pista anterior (Ctrl+Izquierda)", name="previous")
-        self.act_mute = A("Silenciar", self.toggle_mute, "M", checkable=True, tooltip="Silenciar (M)", name="mute")
-        self.act_fullscreen = A("Pantalla completa", self.toggle_fullscreen, "F",
-                                tooltip="Pantalla completa (F)", name="fullscreen")
-        self.act_shuffle = A("Aleatorio", None, checkable=True,
-                             tooltip="Reproducir la lista en orden aleatorio", name="shuffle")
+        """Todas las acciones con nombre (ver actions.ActionRegistry):
+        menus, botones (setDefaultAction), menu contextual del video,
+        controlador de pantalla completa y la ayuda de atajos usan los
+        mismos QAction -- una sola fuente para texto, atajo y estado."""
+        A = self.action_registry.add
+        # Transporte (barra, menus y pantalla completa).
+        self.act_play_pause = A("play_pause", "Reproducir/Pausar", self.toggle_play_pause, "Space",
+                                tooltip="Reproducir/Pausar (Espacio)")
+        self.act_stop = A("stop", "Detener", self.stop, "S", tooltip="Detener (S)")
+        self.act_next = A("next", "Pista siguiente", lambda: self.play_next(auto=False), "Ctrl+Right",
+                          tooltip="Pista siguiente (Ctrl+Derecha)")
+        self.act_prev = A("previous", "Pista anterior", self.play_previous, "Ctrl+Left",
+                          tooltip="Pista anterior (Ctrl+Izquierda)")
+        self.act_mute = A("mute", "Silenciar", self.toggle_mute, "M", checkable=True, tooltip="Silenciar (M)")
+        self.act_fullscreen = A("fullscreen", "Pantalla completa", self.toggle_fullscreen, "F",
+                                tooltip="Pantalla completa (F)")
+        self.act_shuffle = A("shuffle", "Aleatorio", None, checkable=True,
+                             tooltip="Reproducir la lista en orden aleatorio")
         self.act_shuffle.toggled.connect(self._on_shuffle_toggled)
-        self.act_repeat_cycle = A("Cambiar modo de repetición", self._cycle_repeat_mode,
-                                  tooltip="Cicla entre No repetir / Repetir todo / Repetir uno", name="repeat")
-        self.act_ab_loop = A("Bucle A-B", self._on_ab_loop_clicked, name="ab_loop",
+        self.act_repeat_cycle = A("repeat", "Cambiar modo de repetición", self._cycle_repeat_mode,
+                                  tooltip="Cicla entre No repetir / Repetir todo / Repetir uno")
+        self.act_ab_loop = A("ab_loop", "Bucle A-B", self._on_ab_loop_clicked,
                              tooltip="Marca un punto A, luego un punto B: repite en bucle solo ese tramo. "
                                      "Un tercer clic lo desactiva.")
+
+        # Archivo.
+        A("open_files", "Abrir archivos...", self.open_files, QKeySequence.StandardKey.Open)
+        A("open_folder", "Abrir carpeta...", self.open_folder)
+        A("open_url", "Abrir URL...", self.open_url, "Ctrl+U")
+        A("save_playlist", "Guardar lista (.m3u8)...", self.save_playlist)
+        A("load_playlist", "Cargar lista...", self.load_playlist)
+        self.act_restore_session = A(
+            "restore_session", "Recordar la lista al cerrar", checkable=True,
+            tooltip="Al volver a abrir el programa, restaura la lista de reproducción y el elemento actual",
+        )
+        self.act_restore_session.setChecked(True)
+        self.act_restore_session.toggled.connect(lambda _checked: self._schedule_session_save())
+        self.act_allow_multiple_windows = A(
+            "allow_multiple_windows", "Permitir varias ventanas", checkable=True,
+            tooltip="Si está desmarcado, abrir un archivo con el programa ya abierto lo agrega a esa ventana",
+        )
+        A("quit", "Salir", self.close, QKeySequence.StandardKey.Quit)
+
+        # Reproduccion.
+        A("next_frame", "Avanzar un fotograma", self.step_frame, ".",
+          tooltip="Avanza un solo fotograma (el video debe estar en pausa)")
+        A("jump_to_time", "Ir a tiempo...", self.jump_to_time, "Ctrl+G")
+        A("seek_start", "Volver al inicio", lambda: self._seek_to(0), "Home")
+        A("slower", "Más lenta", lambda: self._nudge_rate(-RATE_STEP), "[")
+        A("faster", "Más rápida", lambda: self._nudge_rate(RATE_STEP), "]")
+        A("normal_speed", "Velocidad normal", lambda: self._set_rate(1.0), "=")
+        self.act_prev_chapter = A("previous_chapter", "Capítulo anterior", self.previous_chapter, "PgUp")
+        self.act_next_chapter = A("next_chapter", "Capítulo siguiente", self.next_chapter, "PgDown")
+        A("add_bookmark", "Agregar marcador aquí", self.quick_add_bookmark, "B")
+        A("show_bookmarks", "Ver marcadores...", self.show_bookmarks)
+
+        # Audio.
+        A("equalizer", "Ecualizador...", self.open_equalizer)
+        self.act_visualizer = A("visualizer", "Visualizador de audio (espectro)", checkable=True)
+        self.act_visualizer.setChecked(True)
+        A("audio_earlier", "Adelantar audio 50 ms", lambda: self._adjust_audio_delay(-AUDIO_DELAY_STEP_MS), "J")
+        A("audio_later", "Retrasar audio 50 ms", lambda: self._adjust_audio_delay(AUDIO_DELAY_STEP_MS), "K")
+        A("audio_sync_reset", "Restablecer sincronía de audio", lambda: self._set_audio_delay(0))
+
+        # Video.
+        A("snapshot", "Capturar fotograma...", self.take_snapshot)
+        A("quick_snapshot", "Captura rápida", self.quick_snapshot, "Ctrl+Shift+S",
+          tooltip="Guarda una captura en Imágenes\\Reproductor Multimedia Pro")
+        A("load_subtitle", "Cargar subtítulo externo...", self.load_subtitle_file)
+        A("search_subtitles", "Buscar subtítulos online...", self.search_subtitles_online)
+        A("subtitles_earlier", "Adelantar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(-50), "G")
+        A("subtitles_later", "Retrasar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(50), "H")
+        A("subtitle_sync_reset", "Restablecer sincronía de subtítulos", lambda: self._set_subtitle_delay(0))
+
+        # Ver.
+        self.act_remaining_time = A("remaining_time", "Mostrar tiempo restante", lambda _c=False: self.update_ui(),
+                                    checkable=True,
+                                    tooltip="En vez de la duración total (también con clic sobre ella)")
+        self.act_always_on_top = A("always_on_top", "Siempre visible (encima de otras ventanas)", checkable=True)
+        self.act_always_on_top.toggled.connect(self._on_always_on_top_toggled)
+
+        # Ayuda.
+        A("shortcuts_help", "Atajos de teclado...", self.show_shortcuts_help, "F1")
+        A("open_log_folder", "Abrir carpeta de registros", self.open_log_folder,
+          tooltip="Registro de errores del programa (útil para reportar un problema)")
+        A("about", "Acerca de...", self.show_about)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -506,22 +532,6 @@ class MainWindow(QMainWindow):
         self._enable_mouse_tracking_recursive(self.controls_bar)
         central_layout.addWidget(self.controls_bar)
 
-        # Controlador de pantalla completa: ventana superpuesta propia con
-        # un diseno dedicado (ver FullscreenController).
-        self._controls_overlay = OverlayWindow(self)
-        self.fullscreen_controller = FullscreenController(
-            [("previous", self.act_prev), ("play", self.act_play_pause), ("stop", self.act_stop),
-             ("next", self.act_next), (None, None), ("mute", self.act_mute), (None, None),
-             ("fullscreen", self.act_fullscreen)],
-            self._controls_overlay,
-        )
-        self._controls_overlay.layout().addWidget(self.fullscreen_controller)
-        fs_slider = self.fullscreen_controller.slider
-        fs_slider.sliderPressed.connect(self._on_slider_pressed)
-        fs_slider.sliderReleased.connect(lambda: self._on_slider_released(fs_slider))
-        fs_slider.hovered.connect(self._on_slider_hovered)
-        fs_slider.hoverEnded.connect(self._on_slider_hover_ended)
-
         self.setCentralWidget(central)
 
         # Widget invisible dedicado solo a darle a libVLC una ventana nativa
@@ -534,31 +544,31 @@ class MainWindow(QMainWindow):
         self._preview_video_widget.move(-1000, -1000)
         self.player.attach_preview_output(self._preview_video_widget)
 
-        self.position_slider.hovered.connect(self._on_slider_hovered)
-        self.position_slider.hoverEnded.connect(self._on_slider_hover_ended)
+        self.position_slider.hovered.connect(self.preview.on_hovered)
+        self.position_slider.hoverEnded.connect(self.preview.on_hover_ended)
 
-        # Playlist dock: buscador arriba, lista reordenable debajo.
-        self.playlist_widget = PlaylistWidget()
-        # itemActivated cubre doble clic Y Enter/Return sobre el item enfocado.
-        self.playlist_widget.itemActivated.connect(
-            lambda item: self.play_index(self.playlist_widget.row(item))
-        )
-        self.playlist_widget.reordered.connect(self._sync_after_reorder)
-        self.playlist_widget.installEventFilter(self)
+        # Playlist dock: buscador arriba, lista reordenable debajo (vista
+        # sobre el filtro del controlador, ver playlist_model.py).
+        self.playlist_view = PlaylistView()
+        self.playlist_view.setModel(self.playlist.proxy)
+        # activated cubre doble clic Y Enter/Return sobre la fila enfocada.
+        self.playlist_view.activated.connect(lambda index: self.play_index(self.playlist_view.to_source_row(index)))
+        self.playlist_view.rowsDropped.connect(self.playlist.move_rows)
+        self.playlist_view.installEventFilter(self)
         QShortcut(
-            QKeySequence(Qt.Key.Key_Delete), self.playlist_widget,
+            QKeySequence(Qt.Key.Key_Delete), self.playlist_view,
             activated=self.remove_selected_from_playlist,
             context=Qt.ShortcutContext.WidgetShortcut,
         )
-        self.playlist_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.playlist_widget.customContextMenuRequested.connect(self.show_playlist_context_menu)
-        self.playlist_widget.setAccessibleName("Lista de reproducción")
+        self.playlist_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_view.customContextMenuRequested.connect(self.show_playlist_context_menu)
+        self.playlist_view.setAccessibleName("Lista de reproducción")
 
         self.playlist_filter = QLineEdit()
         self.playlist_filter.setPlaceholderText("Buscar en la lista (Ctrl+F)")
         self.playlist_filter.setClearButtonEnabled(True)
         self.playlist_filter.setAccessibleName("Buscar en la lista")
-        self.playlist_filter.textChanged.connect(self._apply_playlist_filter)
+        self.playlist_filter.textChanged.connect(self.playlist.set_filter)
         self.playlist_filter.returnPressed.connect(self._play_first_filtered)
         self.playlist_filter.installEventFilter(self)
 
@@ -567,9 +577,9 @@ class MainWindow(QMainWindow):
         dock_layout.setContentsMargins(4, 4, 4, 4)
         dock_layout.setSpacing(4)
         dock_layout.addWidget(self.playlist_filter)
-        dock_layout.addWidget(self.playlist_widget, stretch=1)
+        dock_layout.addWidget(self.playlist_view, stretch=1)
 
-        self.playlist_dock = QDockWidget("Lista de reproducción", self)
+        self.playlist_dock = QDockWidget(self.playlist.dock_title(), self)
         # saveState()/restoreState() identifican los docks por objectName.
         self.playlist_dock.setObjectName("playlist_dock")
         self.playlist_dock.setWidget(dock_body)
@@ -581,6 +591,24 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.playlist_dock)
         QShortcut(QKeySequence.StandardKey.Find, dock_body, activated=self._focus_playlist_filter,
                   context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+
+        # Pantalla completa: controlador dedicado en su ventana superpuesta
+        # (ver fullscreen.py).
+        self.fullscreen = FullscreenMode(
+            self, self.playlist_dock, self.controls_bar, self.video_frame,
+            [("previous", self.act_prev), ("play", self.act_play_pause), ("stop", self.act_stop),
+             ("next", self.act_next), (None, None), ("mute", self.act_mute), (None, None),
+             ("fullscreen", self.act_fullscreen)],
+            reposition_overlays=self._reposition_overlays, overlays_allowed=self._overlays_allowed,
+        )
+        self.fullscreen.entered.connect(self._on_fullscreen_entered)
+        self.fullscreen.exited.connect(lambda: self._set_action_icon(self.act_fullscreen, "fullscreen"))
+        self.fullscreen_controller = self.fullscreen.controller
+        fs_slider = self.fullscreen_controller.slider
+        fs_slider.sliderPressed.connect(self._on_slider_pressed)
+        fs_slider.sliderReleased.connect(lambda: self._on_slider_released(fs_slider))
+        fs_slider.hovered.connect(self.preview.on_hovered)
+        fs_slider.hoverEnded.connect(self.preview.on_hover_ended)
 
         self.statusBar().showMessage("Listo")
 
@@ -716,44 +744,22 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         menubar = self.menuBar()
-        A = self._action
+        R = self.action_registry
 
         # -- Archivo --
         menu_file = menubar.addMenu("&Archivo")
-        menu_file.addAction(A("Abrir archivos...", self.open_files, QKeySequence.StandardKey.Open))
-        menu_file.addAction(A("Abrir carpeta...", self.open_folder))
-        menu_file.addAction(A("Abrir URL...", self.open_url, "Ctrl+U"))
-        self.menu_recent_files = menu_file.addMenu("Abrir reciente")
+        self.menu_recent_files = QMenu("Abrir reciente", menu_file)
         self.menu_recent_files.aboutToShow.connect(self._populate_recent_files_menu)
-        menu_file.addSeparator()
-        menu_file.addAction(A("Guardar lista (.m3u8)...", self.save_playlist))
-        menu_file.addAction(A("Cargar lista...", self.load_playlist))
-
-        self.act_restore_session = A(
-            "Recordar la lista al cerrar", checkable=True,
-            tooltip="Al volver a abrir el programa, restaura la lista de reproducción y el elemento actual",
-        )
-        self.act_restore_session.setChecked(True)
-        self.act_restore_session.toggled.connect(lambda _checked: self._schedule_session_save())
-        menu_file.addAction(self.act_restore_session)
-        self.act_allow_multiple_windows = A(
-            "Permitir varias ventanas", checkable=True,
-            tooltip="Si está desmarcado, abrir un archivo con el programa ya abierto lo agrega a esa ventana",
-        )
-        menu_file.addAction(self.act_allow_multiple_windows)
-        menu_file.addSeparator()
-        menu_file.addAction(A("Salir", self.close, QKeySequence.StandardKey.Quit))
+        R.populate(menu_file, [
+            "open_files", "open_folder", "open_url", self.menu_recent_files, None,
+            "save_playlist", "load_playlist", "restore_session", "allow_multiple_windows", None, "quit",
+        ])
 
         # -- Reproducción --
         menu_playback = menubar.addMenu("&Reproducción")
-        for action in (self.act_play_pause, self.act_stop, self.act_next, self.act_prev):
-            menu_playback.addAction(action)
-        act_next_frame = A("Avanzar un fotograma", self.step_frame, ".",
-                           tooltip="Avanza un solo fotograma (el video debe estar en pausa)")
-        menu_playback.addAction(act_next_frame)
-        menu_playback.addAction(A("Ir a tiempo...", self.jump_to_time, "Ctrl+G"))
-        menu_playback.addAction(A("Volver al inicio", lambda: self._seek_to(0), "Home"))
-        menu_playback.addSeparator()
+        R.populate(menu_playback, [
+            "play_pause", "stop", "next", "previous", "next_frame", "jump_to_time", "seek_start", None,
+        ])
 
         self.menu_speed = menu_playback.addMenu("Velocidad")
         self.speed_group = QActionGroup(self)
@@ -764,10 +770,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked, v=value: self._set_rate(v))
             self.speed_group.addAction(action)
             self.menu_speed.addAction(action)
-        self.menu_speed.addSeparator()
-        self.menu_speed.addAction(A("Más lenta", lambda: self._nudge_rate(-RATE_STEP), "["))
-        self.menu_speed.addAction(A("Más rápida", lambda: self._nudge_rate(RATE_STEP), "]"))
-        self.menu_speed.addAction(A("Velocidad normal", lambda: self._set_rate(1.0), "="))
+        R.populate(self.menu_speed, [None, "slower", "faster", "normal_speed"])
         self.speed_button.setMenu(self.menu_speed)
 
         menu_playback.addAction(self.act_shuffle)
@@ -784,12 +787,7 @@ class MainWindow(QMainWindow):
 
         self.menu_chapters = menu_playback.addMenu("Capítulos")
         self.menu_chapters.aboutToShow.connect(self._populate_chapters_menu)
-        self.act_prev_chapter = A("Capítulo anterior", self.previous_chapter, "PgUp")
-        self.act_next_chapter = A("Capítulo siguiente", self.next_chapter, "PgDown")
-        menu_playback.addAction(self.act_prev_chapter)
-        menu_playback.addAction(self.act_next_chapter)
-
-        menu_playback.addSeparator()
+        R.populate(menu_playback, ["previous_chapter", "next_chapter", None])
 
         self.menu_on_finish = menu_playback.addMenu("Al terminar la lista")
         self.on_finish_group = QActionGroup(self.menu_on_finish)
@@ -810,39 +808,26 @@ class MainWindow(QMainWindow):
             self.on_finish_group.addAction(action)
             self.menu_on_finish.addAction(action)
 
-        menu_playback.addSeparator()
-        menu_playback.addAction(A("Agregar marcador aquí", self.quick_add_bookmark, "B"))
-        menu_playback.addAction(A("Ver marcadores...", self.show_bookmarks))
+        R.populate(menu_playback, [None, "add_bookmark", "show_bookmarks"])
 
         # -- Audio --  (A&udio: "&Archivo" ya usa Alt+A)
         menu_audio = menubar.addMenu("A&udio")
-        menu_audio.addAction(self.act_mute)
-        menu_audio.addAction(A("Ecualizador...", self.open_equalizer))
-        self.act_visualizer = A("Visualizador de audio (espectro)", checkable=True)
-        self.act_visualizer.setChecked(True)
-        menu_audio.addAction(self.act_visualizer)
-        self.menu_audio_tracks = menu_audio.addMenu("Pista de audio")
+        self.menu_audio_tracks = QMenu("Pista de audio", menu_audio)
         self.menu_audio_tracks.aboutToShow.connect(self._populate_audio_track_menu)
-        menu_audio.addSeparator()
-        menu_audio.addAction(A("Adelantar audio 50 ms", lambda: self._adjust_audio_delay(-AUDIO_DELAY_STEP_MS), "J"))
-        menu_audio.addAction(A("Retrasar audio 50 ms", lambda: self._adjust_audio_delay(AUDIO_DELAY_STEP_MS), "K"))
-        menu_audio.addAction(A("Restablecer sincronía de audio", lambda: self._set_audio_delay(0)))
+        R.populate(menu_audio, [
+            "mute", "equalizer", "visualizer", self.menu_audio_tracks, None,
+            "audio_earlier", "audio_later", "audio_sync_reset",
+        ])
 
         # -- Video --
         menu_video = menubar.addMenu("&Video")
-        menu_video.addAction(self.act_fullscreen)
-        menu_video.addAction(A("Capturar fotograma...", self.take_snapshot))
-        menu_video.addAction(A("Captura rápida", self.quick_snapshot, "Ctrl+Shift+S",
-                               tooltip="Guarda una captura en Imágenes\\Reproductor Multimedia Pro"))
-        menu_video.addSeparator()
-
-        self.menu_subtitle_tracks = menu_video.addMenu("Pista de subtítulos")
+        self.menu_subtitle_tracks = QMenu("Pista de subtítulos", menu_video)
         self.menu_subtitle_tracks.aboutToShow.connect(self._populate_subtitle_track_menu)
-        menu_video.addAction(A("Cargar subtítulo externo...", self.load_subtitle_file))
-        menu_video.addAction(A("Buscar subtítulos online...", self.search_subtitles_online))
-        menu_video.addAction(A("Adelantar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(-50), "G"))
-        menu_video.addAction(A("Retrasar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(50), "H"))
-        menu_video.addAction(A("Restablecer sincronía de subtítulos", lambda: self._set_subtitle_delay(0)))
+        R.populate(menu_video, [
+            "fullscreen", "snapshot", "quick_snapshot", None,
+            self.menu_subtitle_tracks, "load_subtitle", "search_subtitles",
+            "subtitles_earlier", "subtitles_later", "subtitle_sync_reset",
+        ])
 
         self.menu_sub_size = menu_video.addMenu("Tamaño de subtítulos")
         sub_size_group = QActionGroup(self.menu_sub_size)
@@ -878,13 +863,7 @@ class MainWindow(QMainWindow):
         menu_view = menubar.addMenu("&Ver")
         act_toggle_playlist = self.playlist_dock.toggleViewAction()
         act_toggle_playlist.setText("Mostrar lista de reproducción")
-        menu_view.addAction(act_toggle_playlist)
-        self.act_remaining_time = A("Mostrar tiempo restante", lambda _c=False: self.update_ui(), checkable=True,
-                                    tooltip="En vez de la duración total (también con clic sobre ella)")
-        menu_view.addAction(self.act_remaining_time)
-        self.act_always_on_top = A("Siempre visible (encima de otras ventanas)", checkable=True)
-        self.act_always_on_top.toggled.connect(self._on_always_on_top_toggled)
-        menu_view.addAction(self.act_always_on_top)
+        R.populate(menu_view, [act_toggle_playlist, "remaining_time", "always_on_top"])
         self.menu_theme = menu_view.addMenu("Tema")
         self.theme_group = QActionGroup(self)
         self.theme_group.setExclusive(True)
@@ -898,32 +877,24 @@ class MainWindow(QMainWindow):
 
         # -- Ayuda --
         menu_help = menubar.addMenu("A&yuda")
-        menu_help.addAction(A("Atajos de teclado...", self.show_shortcuts_help, "F1"))
-        menu_help.addAction(A("Abrir carpeta de registros", self.open_log_folder,
-                              tooltip="Registro de errores del programa (útil para reportar un problema)"))
-        menu_help.addAction(A("Acerca de...", self.show_about))
+        R.populate(menu_help, ["shortcuts_help", "open_log_folder", "about"])
 
         # Menu contextual del video: las mismas acciones y submenus.
-        self.video_context_menu = QMenu(self)
-        for item in (self.act_play_pause, self.act_stop, self.act_prev, self.act_next, None,
-                     self.act_fullscreen, None, self.menu_speed, self.menu_chapters, self.menu_audio_tracks,
-                     self.menu_subtitle_tracks, self.menu_zoom, None, self.act_always_on_top):
-            if item is None:
-                self.video_context_menu.addSeparator()
-            elif isinstance(item, QMenu):
-                self.video_context_menu.addMenu(item)
-            else:
-                self.video_context_menu.addAction(item)
+        self.video_context_menu = R.populate(QMenu(self), [
+            "play_pause", "stop", "previous", "next", None, "fullscreen", None,
+            self.menu_speed, self.menu_chapters, self.menu_audio_tracks, self.menu_subtitle_tracks,
+            self.menu_zoom, None, "always_on_top",
+        ])
 
     def _build_gpu_menu(self, menu_video):
         self.menu_gpu = menu_video.addMenu("Mejora por GPU")
-        self.act_gpu_upscale = self._action(
-            "Superresolución (RTX Video / Intel)", checkable=True,
+        self.act_gpu_upscale = self.action_registry.add(
+            "gpu_upscale", "Superresolución (RTX Video / Intel)", checkable=True,
             tooltip="Solo actúa cuando el video se agranda (ventana más grande que el video). Requiere "
                     "\"RTX Video Enhancement\" activado en el Panel de control de NVIDIA y la salida Direct3D11.",
         )
-        self.act_gpu_hdr = self._action(
-            "HDR a partir de SDR (RTX Video HDR)", checkable=True,
+        self.act_gpu_hdr = self.action_registry.add(
+            "gpu_hdr", "HDR a partir de SDR (RTX Video HDR)", checkable=True,
             tooltip="Requiere HDR activado en la configuración de pantalla de Windows y una GPU compatible.",
         )
         self.menu_gpu.setToolTipsVisible(True)
@@ -942,23 +913,10 @@ class MainWindow(QMainWindow):
             self.hw_decoding_group.addAction(action)
             self.menu_hw_decoding.addAction(action)
 
-    def _register_shortcut_actions(self):
-        """Casi todos los atajos viven en QActions de los menus. Qt solo
-        activa el atajo de un QAction si alguno de sus widgets asociados
-        esta visible, y en pantalla completa la barra de menus se oculta:
-        agregarlos tambien a la propia ventana los mantiene activos siempre;
-        es el mismo QAction, asi que no se duplica ni se vuelve ambiguo."""
-        for action in self.findChildren(QAction):
-            if not action.shortcut().isEmpty() and action not in self.actions():
-                self.addAction(action)
-
-    def _add_shortcut(self, key, description, slot):
-        sequence = QKeySequence(key)
-        QShortcut(sequence, self, activated=slot)
-        self._extra_shortcuts.append((description, sequence))
-
     def _build_shortcuts(self):
-        S = self._add_shortcut
+        """Atajos sin entrada de menu (QShortcut de ventana), registrados
+        con su descripcion para la ayuda."""
+        S = self.action_registry.add_shortcut
         S(Qt.Key.Key_Escape, "Salir de pantalla completa", self._exit_fullscreen)
         S(Qt.Key.Key_Right, "Adelantar 5 s", lambda: self._seek_relative(5000))
         S(Qt.Key.Key_Left, "Retroceder 5 s", lambda: self._seek_relative(-5000))
@@ -978,23 +936,18 @@ class MainWindow(QMainWindow):
         S(Qt.Key.Key_MediaStop, "Tecla multimedia Detener", self.stop)
         S(Qt.Key.Key_MediaNext, "Tecla multimedia Siguiente", lambda: self.play_next(auto=False))
         S(Qt.Key.Key_MediaPrevious, "Tecla multimedia Anterior", self.play_previous)
+        self.action_registry.static_rows = [
+            ("Buscar en la lista (con la lista enfocada)", QKeySequence(QKeySequence.StandardKey.Find)
+             .toString(QKeySequence.SequenceFormat.NativeText)),
+            ("Quitar de la lista (con la lista enfocada)", "Supr"),
+            ("Volumen / buscar ±5 s", "Rueda / Ctrl+Rueda sobre el video"),
+            ("Pantalla completa", "Doble clic sobre el video"),
+        ]
 
     def shortcut_rows(self) -> list:
-        """(descripcion, atajo) de todo lo que tiene atajo de teclado, tal
-        como esta registrado (para Ayuda -> Atajos de teclado)."""
-        rows = []
-        for action in self.actions():
-            if not action.shortcut().isEmpty():
-                text = action.text().replace("&", "")
-                rows.append((text, action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)))
-        for description, sequence in self._extra_shortcuts:
-            rows.append((description, sequence.toString(QKeySequence.SequenceFormat.NativeText)))
-        rows.append(("Buscar en la lista (con la lista enfocada)", QKeySequence(QKeySequence.StandardKey.Find)
-                     .toString(QKeySequence.SequenceFormat.NativeText)))
-        rows.append(("Quitar de la lista (con la lista enfocada)", "Supr"))
-        rows.append(("Volumen / buscar ±5 s", "Rueda / Ctrl+Rueda sobre el video"))
-        rows.append(("Pantalla completa", "Doble clic sobre el video"))
-        return rows
+        """(descripcion, atajo) para Ayuda -> Atajos de teclado, generado
+        del registro de acciones (no se desincroniza del codigo)."""
+        return self.action_registry.shortcut_rows()
 
     def show_shortcuts_help(self):
         dialog = QDialog(self)
@@ -1081,6 +1034,7 @@ class MainWindow(QMainWindow):
         path = self._current_path_or_none()
         if path is None or not is_url(path):
             return  # los archivos locales tambien "almacenan", sin interes
+        self._buffer_fill = max(0.0, min(100.0, percent))
         if percent < 100:
             self.statusBar().showMessage(f"Almacenando en búfer… {int(percent)} %")
             if not self._stall_timer.isActive():
@@ -1113,9 +1067,7 @@ class MainWindow(QMainWindow):
         if path is None or not is_url(path):
             return
         title = self.player.now_playing()
-        if title and self._icy_titles.get(path) != title:
-            self._icy_titles[path] = title
-            self._refresh_item(self.current_index)
+        if self.playlist.set_icy_title(path, title):
             self.setWindowTitle(f"Reproductor Multimedia Pro — {title}")
 
     def _on_snapshot_taken(self, filename: str):
@@ -1189,90 +1141,25 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"No responde: {self._display_name(path)}")
 
     # ------------------------------------------------------------ playlist
+    # Modelo, filtro, orden y metadatos viven en self.playlist
+    # (PlaylistController); aqui queda lo que toca la ventana: abrir,
+    # dialogos, menu contextual y detener lo que suena antes de quitarlo.
     def _display_name(self, path: str) -> str:
-        if is_url(path):
-            return f"🌐 {path}"
-        prefix = "🎵" if is_audio_file(path) else "🎬"
-        return f"{prefix} {os.path.basename(path)}"
+        return display_name(path)
 
     def _entry_label(self, path: str) -> str:
-        """Texto de una entrada: "Artista — Titulo" si el archivo trae
-        etiquetas, el titulo ICY para una radio, si no el nombre."""
-        if is_url(path):
-            title = self._icy_titles.get(path)
-            return f"🌐 {title}" if title else f"🌐 {path}"
-        tags = self._known_tags.get(path_key(path))
-        if tags:
-            artist, title = tags
-            prefix = "🎵" if is_audio_file(path) else "🎬"
-            return f"{prefix} {artist} — {title}" if artist else f"{prefix} {title}"
-        return self._display_name(path)
-
-    def _refresh_item(self, row: int):
-        item = self.playlist_widget.item(row)
-        if item is None:
-            return
-        path = item.data(Qt.ItemDataRole.UserRole)
-        text = self._entry_label(path)
-        duration = self._known_durations.get(path_key(path))
-        if duration:
-            text = f"{text} — {format_time(duration)}"
-        if row == self.current_index:
-            text = f"▶ {text}"
-        item.setText(text)
-        item.setToolTip(path)
-        font = item.font()
-        if font.bold() != (row == self.current_index):
-            font.setBold(row == self.current_index)
-            item.setFont(font)
-
-    def _refresh_all_items(self):
-        for row in range(self.playlist_widget.count()):
-            self._refresh_item(row)
-        self._update_dock_title()
+        return self.playlist.entry_label(path)
 
     def _set_current_index(self, index: int):
         """Cambia la fila actual y mueve el marcador ▶ (independiente de la
-        seleccion: antes la fila en reproduccion solo se veia como
-        seleccionada, y se perdia al hacer clic en otra)."""
-        old, self.current_index = self.current_index, index
-        if old != index:
-            self._refresh_item(old)
-        self._refresh_item(index)
-
-    def _update_dock_title(self):
-        count = self.playlist_widget.count()
-        if count == 0:
-            self.playlist_dock.setWindowTitle("Lista de reproducción")
-            return
-        total = sum(self._known_durations.get(path_key(p), 0) for p in self.playlist_entries())
-        suffix = f" — {format_time(total)}" if total else ""
-        noun = "elemento" if count == 1 else "elementos"
-        self.playlist_dock.setWindowTitle(f"Lista de reproducción ({count} {noun}){suffix}")
+        seleccion)."""
+        self.playlist.current_index = index
 
     def add_files_to_playlist(self, paths):
         """Unico punto de entrada a la playlist (dialogos, carpetas, arrastrar
-        y soltar, linea de comandos, recientes, .m3u, otra instancia):
-        normaliza aqui cada ruta local una sola vez (ver
-        formats.normalize_path)."""
-        paths = [normalize_path(p) for p in paths]
-        for p in paths:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, p)
-            item.setData(ITEM_ID_ROLE, self._next_item_id)
-            self._row_ids.append(self._next_item_id)
-            self._next_item_id += 1
-            self.playlist_widget.addItem(item)
-            self._refresh_item(self.playlist_widget.count() - 1)
-            if not is_url(p) and path_key(p) not in self._known_durations:
-                self._metadata_queue.append(p)
-        self.order.append(len(paths))
-        if paths:
-            self._schedule_session_save()
-            self._apply_playlist_filter(self.playlist_filter.text())
-            self._update_dock_title()
-            if self._metadata_queue and not self._metadata_timer.isActive():
-                self._metadata_timer.start()
+        y soltar, linea de comandos, recientes, .m3u, otra instancia); ver
+        PlaylistController.add."""
+        self.playlist.add(paths)
 
     def open_paths(self, paths, play: bool = True) -> int:
         """Agrega lo que el usuario "abrio" (carpetas y .m3u expandidos) y,
@@ -1281,11 +1168,18 @@ class MainWindow(QMainWindow):
         entries = expand_inputs(paths)
         if not entries:
             return 0
-        start_index = self.playlist_widget.count()
-        self.add_files_to_playlist(entries)
+        start_index = self.playlist.add(entries)
         if play or self.current_index == -1:
             self.play_index(start_index)
         return len(entries)
+
+    def _add_and_maybe_play(self, entries):
+        """Agrega y, si no sonaba nada, reproduce lo primero agregado."""
+        if not entries:
+            return
+        start_index = self.playlist.add(entries)
+        if self.current_index == -1:
+            self.play_index(start_index)
 
     def handle_instance_message(self, action: str, paths):
         """Mensaje de otra instancia (ver single_instance.py)."""
@@ -1298,85 +1192,22 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    # -- metadatos en segundo plano ------------------------------------------
-    def _probe_next_metadata(self):
-        while self._metadata_queue and self._metadata_probe.pending_count() < METADATA_BATCH:
-            path = self._metadata_queue.pop(0)
-            if path_key(path) in self._known_durations or not os.path.isfile(path):
-                continue
-            self._metadata_probe.probe(path)
-        if self._metadata_queue:
-            self._metadata_timer.start()
-
-    def _on_metadata_parsed(self, path: str, duration_ms: int, title: str, artist: str):
-        key = path_key(path)
-        if duration_ms > 0:
-            self._known_durations.setdefault(key, duration_ms)
-        stem = os.path.splitext(os.path.basename(path))[0]
-        # libVLC usa el nombre del archivo como "titulo" si no hay etiqueta.
-        if title and title not in (stem, os.path.basename(path)):
-            self._known_tags[key] = (artist, title)
-        for row in range(self.playlist_widget.count()):
-            if path_key(self.playlist_widget.item(row).data(Qt.ItemDataRole.UserRole)) == key:
-                self._refresh_item(row)
-        self._update_dock_title()
-        if self._metadata_queue and not self._metadata_timer.isActive():
-            self._metadata_timer.start()
-
     # -- buscador y reordenar ----------------------------------------------
     def _focus_playlist_filter(self):
         self.playlist_dock.show()
         self.playlist_filter.setFocus()
         self.playlist_filter.selectAll()
 
-    def _apply_playlist_filter(self, text: str):
-        needle = text.strip().casefold()
-        for row in range(self.playlist_widget.count()):
-            item = self.playlist_widget.item(row)
-            haystack = f"{item.text()} {item.data(Qt.ItemDataRole.UserRole)}".casefold()
-            item.setHidden(bool(needle) and needle not in haystack)
-
     def _play_first_filtered(self):
-        for row in range(self.playlist_widget.count()):
-            if not self.playlist_widget.item(row).isHidden():
-                self.play_index(row)
-                return
-
-    def _sync_after_reorder(self):
-        """La lista cambio de orden (arrastre o "Ordenar"): se reconstruye
-        el orden a partir de los ids estables de cada fila, y se actualizan
-        el aleatorio, la fila actual y la de la sesion."""
-        new_ids = [self.playlist_widget.item(r).data(ITEM_ID_ROLE) for r in range(self.playlist_widget.count())]
-        if new_ids == self._row_ids:
-            return
-        old_row = {item_id: row for row, item_id in enumerate(self._row_ids)}
-        new_order = [old_row[i] for i in new_ids]
-        self.order.reorder(new_order)
-        remap = {old: new for new, old in enumerate(new_order)}
-        if self.current_index != -1:
-            self.current_index = remap[self.current_index]
-        if self._session_row != -1:
-            self._session_row = remap[self._session_row]
-        self._row_ids = new_ids
-        self._refresh_all_items()
-        self._schedule_session_save()
+        row = self.playlist.first_visible_row()
+        if row != -1:
+            self.play_index(row)
 
     def sort_playlist(self, by: str = "name"):
-        def key(item):
-            path = item.data(Qt.ItemDataRole.UserRole)
-            return natural_sort_key(os.path.basename(path) if by == "name" and not is_url(path) else path)
-
-        items = [self.playlist_widget.takeItem(0) for _ in range(self.playlist_widget.count())]
-        items.sort(key=key)
-        for item in items:
-            self.playlist_widget.addItem(item)
-        self._sync_after_reorder()
+        self.playlist.sort(by)
 
     def remove_unavailable(self) -> int:
-        rows = [
-            r for r, p in enumerate(self.playlist_entries())
-            if not is_url(p) and not os.path.exists(p)
-        ]
+        rows = self.playlist.unavailable_rows()
         self.remove_rows(rows)
         if rows:
             noun = "entrada no disponible quitada" if len(rows) == 1 else "entradas no disponibles quitadas"
@@ -1391,10 +1222,7 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self._remember_dir(paths[0])
-        start_index = self.playlist_widget.count()
-        self.add_files_to_playlist(expand_inputs(paths))
-        if self.current_index == -1:
-            self.play_index(start_index)
+        self._add_and_maybe_play(expand_inputs(paths))
 
     def open_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Abrir carpeta", self._open_dir())
@@ -1405,10 +1233,7 @@ class MainWindow(QMainWindow):
         if not found:
             QMessageBox.information(self, "Abrir carpeta", "No se encontraron archivos multimedia soportados.")
             return
-        start_index = self.playlist_widget.count()
-        self.add_files_to_playlist(found)
-        if self.current_index == -1:
-            self.play_index(start_index)
+        self._add_and_maybe_play(found)
 
     def open_url(self):
         dialog = OpenUrlDialog(self.player.network_caching_ms, self.player.rtsp_tcp, self)
@@ -1416,16 +1241,13 @@ class MainWindow(QMainWindow):
             return
         self.player.network_caching_ms = dialog.network_caching_ms()
         self.player.rtsp_tcp = dialog.rtsp_tcp()
-        self.add_files_to_playlist([dialog.url()])
-        self.play_index(self.playlist_widget.count() - 1)
+        self.play_index(self.playlist.add([dialog.url()]))
 
     def open_recent_file(self, path: str):
         if not is_url(path) and not os.path.exists(path):
             QMessageBox.warning(self, "Archivo reciente", f"No se encontró el archivo:\n{path}")
             return
-        start_index = self.playlist_widget.count()
-        self.add_files_to_playlist([path])
-        self.play_index(start_index)
+        self.play_index(self.playlist.add([path]))
 
     def _populate_recent_files_menu(self):
         self.menu_recent_files.clear()
@@ -1445,7 +1267,7 @@ class MainWindow(QMainWindow):
         self.menu_recent_files.addAction(act_clear)
 
     def save_playlist(self):
-        if self.playlist_widget.count() == 0:
+        if self.playlist.count() == 0:
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar lista de reproducción", os.path.join(self._open_dir(), "playlist.m3u8"),
@@ -1472,16 +1294,14 @@ class MainWindow(QMainWindow):
         if not os.path.isfile(path):
             QMessageBox.warning(self, "Cargar lista", f"No se pudo leer la lista:\n{path}")
             return
-        entries = read_playlist_file(path)
-        if entries:
-            start_index = self.playlist_widget.count()
-            self.add_files_to_playlist(entries)
-            if self.current_index == -1:
-                self.play_index(start_index)
+        self._add_and_maybe_play(read_playlist_file(path))
 
     def show_playlist_context_menu(self, pos):
-        item = self.playlist_widget.itemAt(pos)
-        path = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        view = self.playlist_view
+        index = view.indexAt(pos)
+        row = view.to_source_row(index)
+        path = self.playlist.path(row)
+        selected = set(view.selected_source_rows())
         menu = QMenu(self)
         act_play = menu.addAction("Reproducir")
         act_remove = menu.addAction("Quitar de la lista")
@@ -1495,20 +1315,21 @@ class MainWindow(QMainWindow):
         act_unavailable = menu.addAction("Quitar entradas no disponibles")
         act_clear = menu.addAction("Vaciar lista")
         for action in (act_play, act_remove, act_copy):
-            action.setEnabled(item is not None)
+            action.setEnabled(path is not None)
         act_show.setEnabled(path is not None and not is_url(path))
-        if item is not None and len(self.playlist_widget.selectedItems()) > 1 and item.isSelected():
+        if path is not None and len(selected) > 1 and row in selected:
             act_remove.setText("Quitar seleccionados de la lista")
-        chosen = menu.exec(self.playlist_widget.mapToGlobal(pos))
-        if chosen == act_play and item is not None:
-            self.play_index(self.playlist_widget.row(item))
-        elif chosen == act_remove and item is not None:
-            # Clic derecho sobre un item seleccionado quita toda la seleccion;
-            # sobre uno no seleccionado, solo ese (como el Explorador).
-            if item.isSelected():
+        chosen = menu.exec(view.viewport().mapToGlobal(pos))
+        if chosen == act_play and path is not None:
+            self.play_index(row)
+        elif chosen == act_remove and path is not None:
+            # Clic derecho sobre una fila seleccionada quita toda la
+            # seleccion; sobre una no seleccionada, solo esa (como el
+            # Explorador).
+            if row in selected:
                 self.remove_selected_from_playlist()
             else:
-                self.remove_rows([self.playlist_widget.row(item)])
+                self.remove_rows([row])
         elif chosen == act_show and path is not None:
             self.show_in_file_manager(path)
         elif chosen == act_copy and path is not None:
@@ -1529,10 +1350,10 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
 
     def remove_selected_from_playlist(self):
-        self.remove_rows([self.playlist_widget.row(i) for i in self.playlist_widget.selectedItems()])
+        self.remove_rows(self.playlist_view.selected_source_rows())
 
     def remove_rows(self, rows):
-        rows = sorted({r for r in rows if 0 <= r < self.playlist_widget.count()})
+        rows = sorted({r for r in rows if 0 <= r < self.playlist.count()})
         if not rows:
             return
         if self.current_index in rows:
@@ -1541,46 +1362,25 @@ class MainWindow(QMainWindow):
             self._save_current_position()
             self.player.stop()
             self.player.stop_preview()
-            self.current_index = -1
-        else:
-            self.current_index -= sum(1 for r in rows if r < self.current_index)
-        if self._session_row in rows:
-            self._session_row = -1
-        elif self._session_row != -1:
-            self._session_row -= sum(1 for r in rows if r < self._session_row)
-        for r in reversed(rows):
-            self.playlist_widget.takeItem(r)
-            del self._row_ids[r]
-        # Si se quito la actual, PlaylistOrder recuerda su fila: Siguiente/
-        # Reproducir siguen con la que tomo su lugar (antes volvian a la 1.a).
-        self.order.remove(rows)
-        self._schedule_session_save()
-        self._update_dock_title()
+        self.playlist.remove_rows(rows)
 
     def clear_playlist(self):
         self._save_current_position()
-        self.playlist_widget.clear()
-        self._row_ids = []
-        self.current_index = -1
-        self._session_row = -1
         self.player.stop()
         self.player.stop_preview()
-        self.order.reset(0)
-        self._schedule_session_save()
-        self._update_dock_title()
+        self.playlist.clear()
 
     # ------------------------------------------------------------ transport
     def play_index(self, index: int, user: bool = True):
         """user=False solo cuando la llama el avance automatico (fin de
         pista o fallo); cualquier eleccion del usuario reinicia el conteo
         de fallos seguidos."""
-        item = self.playlist_widget.item(index)
-        if item is None:
+        path = self.playlist.path(index)
+        if path is None:
             return
         self._save_current_position()
         if user:
             self._consecutive_failures = 0
-        path = item.data(Qt.ItemDataRole.UserRole)
         self._set_current_index(index)
         self._session_row = -1
         self._schedule_session_save()
@@ -1589,9 +1389,10 @@ class MainWindow(QMainWindow):
         self._bookmarks_cache = None
         self._chapters_cache = None
         self._stall_timer.stop()
+        self._buffer_fill = 0.0
         if self.player.preview_current_path() not in (None, path):
             self.player.stop_preview()
-        self.playlist_widget.setCurrentRow(index)
+        self.playlist_view.set_current_source_row(index)
         self._advancing = False
         self._clear_ab_loop()
         if self.bookmarks_dialog is not None:
@@ -1624,8 +1425,7 @@ class MainWindow(QMainWindow):
         save_position(path, self.player.get_time_ms(), self.player.get_length_ms())
 
     def _current_path_or_none(self):
-        item = self.playlist_widget.item(self.current_index) if self.current_index != -1 else None
-        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        return self.playlist.current_path()
 
     def toggle_play_pause(self):
         if self.current_index == -1:
@@ -1633,7 +1433,7 @@ class MainWindow(QMainWindow):
                 # Elemento que estaba sonando al cerrar (sesion restaurada).
                 self.play_index(self._session_row)
                 return
-            if self.playlist_widget.count() > 0:
+            if self.playlist.count() > 0:
                 first = self.order.advance(repeat_all=False)
                 self.play_index(first if first is not None else 0)
             return
@@ -1674,8 +1474,7 @@ class MainWindow(QMainWindow):
         after_failure: la pista actual no se pudo reproducir -- en ese caso
         se ignora Repetir: Uno (si no, reintentaria el mismo archivo roto
         para siempre)."""
-        count = self.playlist_widget.count()
-        if count == 0:
+        if self.playlist.count() == 0:
             return
         if self.repeat_mode == "one" and auto and not after_failure and self.current_index != -1:
             self.play_index(self.current_index, user=False)
@@ -2003,15 +1802,12 @@ class MainWindow(QMainWindow):
         frame = self._video_frame_global_rect()
         hint = self._osd_label.sizeHint()
         self._osd_overlay.setGeometry(osd_rect(frame, hint.width(), hint.height()))
-        if self._controls_are_floating():
-            self._controls_overlay.setGeometry(floating_controls_rect(
-                frame, self.fullscreen_controller.sizeHint().height(),
-                margin=FULLSCREEN_CONTROLLER_MARGIN, max_width=FULLSCREEN_CONTROLLER_MAX_WIDTH,
-            ))
+        if hasattr(self, "fullscreen"):
+            self.fullscreen.reposition(frame)
 
     def _hide_overlays(self):
         self._osd_overlay.hide()
-        self._controls_overlay.hide()
+        self.fullscreen.overlay.hide()
 
     def _on_application_state_changed(self, state):
         # Al pasar a otra aplicacion (Alt+Tab) las superpuestas no deben
@@ -2029,116 +1825,6 @@ class MainWindow(QMainWindow):
     def moveEvent(self, event):
         super().moveEvent(event)
         self._reposition_overlays()
-
-    # ------------------------------------------------------- vista previa
-    # Buscar-y-capturar en el reproductor secundario no es instantáneo: la
-    # búsqueda es asíncrona y libVLC necesita decodificar hasta ese punto.
-    # Por eso: (1) el hover se debounce (~300 ms quieto sobre la barra), (2)
-    # se sirve desde la cache si esa zona ya se capturo, y (3) si no, se
-    # sondea la captura cada 40 ms (hasta 400 ms) en vez de esperar un
-    # tiempo fijo y mostrar un fotograma viejo con el tiempo nuevo.
-    def _on_slider_hovered(self, fraction: float, global_pos: QPoint):
-        if self.current_index == -1 or self.player.get_length_ms() <= 0:
-            return
-        self._pending_hover_fraction = fraction
-        self._pending_hover_pos = global_pos
-        self._preview_idle_timer.stop()
-        self._preview_hover_timer.start()
-
-    def _on_slider_hover_ended(self):
-        self._preview_hover_timer.stop()
-        self._capture_timer.stop()
-        self._hide_hover_preview()
-        if not self.player.is_preview_warmed_up():
-            # Todavia no salio ningun fotograma, asi que no se puede pausar
-            # sin romper su vout (ver VLCPlayer.load_preview_media): se
-            # detiene para que no siga decodificando todo el archivo en
-            # segundo plano hasta el proximo hover.
-            self.player.stop_preview()
-        if self.player.has_preview_player():
-            # Sin hovers por un rato, se libera (archivo y decodificador).
-            self._preview_idle_timer.start()
-
-    def _ensure_preview_popup(self):
-        if self._preview_popup is not None:
-            return
-        self._preview_popup = QWidget(None, Qt.WindowType.ToolTip)
-        self._preview_popup.setStyleSheet(theme.PREVIEW_POPUP_STYLE)
-        popup_layout = QVBoxLayout(self._preview_popup)
-        popup_layout.setContentsMargins(2, 2, 2, 2)
-        popup_layout.setSpacing(2)
-        self._preview_thumbnail_label = QLabel()
-        self._preview_thumbnail_label.setFixedSize(160, 90)
-        self._preview_thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        popup_layout.addWidget(self._preview_thumbnail_label)
-        self._preview_time_label = QLabel()
-        self._preview_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_time_label.setStyleSheet(theme.PREVIEW_TIME_STYLE)
-        popup_layout.addWidget(self._preview_time_label)
-
-    def _show_hover_preview(self):
-        path = self._current_path_or_none()
-        if path is None or self._pending_hover_fraction is None or self._pending_hover_pos is None:
-            return
-        fraction = self._pending_hover_fraction
-        self._ensure_preview_popup()
-        time_ms = int(fraction * self.player.get_length_ms())
-        chapter = self.chapter_name_at(time_ms)
-        self._preview_time_label.setText(f"{format_time(time_ms)} — {chapter}" if chapter else format_time(time_ms))
-
-        thumbnails = self.player.preview_supported(path)
-        self._preview_thumbnail_label.setVisible(thumbnails)
-        if thumbnails:
-            cached = self._thumbnail_cache.get(path, fraction)
-            if cached is not None:
-                self._preview_thumbnail_label.setPixmap(cached)
-            else:
-                # Sin fotograma viejo (de otra posicion u otro archivo).
-                self._preview_thumbnail_label.clear()
-                self._request_hover_snapshot(path, fraction)
-
-        self._preview_popup.adjustSize()
-        self._preview_popup.move(
-            self._pending_hover_pos.x() - self._preview_popup.width() // 2,
-            self._pending_hover_pos.y() - self._preview_popup.height() - 20,
-        )
-        self._preview_popup.show()
-
-    def _request_hover_snapshot(self, path: str, fraction: float):
-        if self.player.preview_current_path() != path:
-            if not self.player.load_preview_media(path):
-                return
-        self.player.seek_preview(fraction)
-        remove_quietly(self._preview_snapshot_path)
-        self._capture_request = (path, fraction)
-        self._capture_attempts = 0
-        self._capture_timer.start()
-
-    def _poll_hover_snapshot(self):
-        self._capture_attempts += 1
-        if self._capture_attempts * CAPTURE_POLL_MS > CAPTURE_TIMEOUT_MS:
-            self._capture_timer.stop()
-            return
-        if self._capture_request is None or self._preview_popup is None or not self._preview_popup.isVisible():
-            self._capture_timer.stop()
-            return
-        if not os.path.exists(self._preview_snapshot_path):
-            dpr = self.devicePixelRatioF()
-            self.player.take_preview_snapshot(self._preview_snapshot_path, width=int(160 * dpr), height=int(90 * dpr))
-        if os.path.exists(self._preview_snapshot_path) and os.path.getsize(self._preview_snapshot_path) > 0:
-            pixmap = QPixmap(self._preview_snapshot_path)
-            if pixmap.isNull():
-                return  # todavia escribiendose
-            pixmap.setDevicePixelRatio(self.devicePixelRatioF())
-            path, fraction = self._capture_request
-            self._thumbnail_cache.put(path, fraction, pixmap)
-            self._preview_thumbnail_label.setPixmap(pixmap)
-            self._capture_timer.stop()
-            self._capture_request = None
-
-    def _hide_hover_preview(self):
-        if self._preview_popup is not None:
-            self._preview_popup.hide()
 
     def toggle_mute(self):
         self._set_muted(not self.player.is_muted())
@@ -2178,10 +1864,12 @@ class MainWindow(QMainWindow):
             self.position_slider.setAccessibleDescription(f"{format_time(time_ms)} de {format_time(length)}")
 
             path = self._current_path_or_none()
-            if path is not None and path_key(path) not in self._known_durations:
-                self._known_durations[path_key(path)] = length
-                self._refresh_item(self.current_index)
-                self._update_dock_title()
+            if path is not None:
+                self.playlist.note_duration(path, length)
+
+        buffered = None if live else self._buffered_fractions(length, time_ms)
+        for slider in sliders:
+            slider.set_buffered_range(*(buffered or (None, None)))
 
         self._update_play_icon()
         self._check_ab_loop()
@@ -2197,6 +1885,20 @@ class MainWindow(QMainWindow):
         if self.isFullScreen():
             path = self._current_path_or_none()
             self.fullscreen_controller.title_label.setText(self._entry_label(path) if path else "")
+
+    def _buffered_fractions(self, length_ms: int, time_ms: int):
+        """(inicio, fin) del tramo almacenado de un stream de red con
+        duracion conocida, en fracciones de la barra; None si no aplica.
+        libVLC no expone que bytes ya bajo: lo que si sabe es cuanto de su
+        cache de red (:network-caching) esta lleno, y ese es el tramo que
+        tiene listo delante de la posicion actual."""
+        path = self._current_path_or_none()
+        if path is None or not is_url(path) or length_ms <= 0:
+            return None
+        ahead_ms = self.player.network_caching_ms * self._buffer_fill / 100.0
+        if ahead_ms <= 0:
+            return None
+        return time_ms / length_ms, min(1.0, (time_ms + ahead_ms) / length_ms)
 
     def _set_time_labels(self, current: str, total: str):
         self.label_time_current.setText(current)
@@ -2217,7 +1919,7 @@ class MainWindow(QMainWindow):
             self._consecutive_failures += 1
             name = self._display_name(path) if path is not None else "?"
             log.warning("No se pudo reproducir: %s (estado %s)", path, state)
-            if self._consecutive_failures >= self.playlist_widget.count():
+            if self._consecutive_failures >= self.playlist.count():
                 # Una vuelta completa sin poder reproducir nada: detenerse en
                 # vez de reintentar en bucle (y reescribir recientes cada vez).
                 self.player.stop()
@@ -2411,79 +2113,19 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ fullscreen
     def toggle_fullscreen(self):
-        if self.isFullScreen():
-            self._exit_fullscreen()
-        else:
-            self._dock_was_visible = self.playlist_dock.isVisible()
-            self._status_bar_was_visible = not self.statusBar().isHidden()
-            self.playlist_dock.setVisible(False)
-            self.menuBar().setVisible(False)
-            self.statusBar().setVisible(False)
-            self._float_controls_bar()
-            self.showFullScreen()
-            self._set_action_icon(self.act_fullscreen, "fullscreen_exit")
-            self.update_ui()
-            self._on_fullscreen_mouse_activity()
+        self.fullscreen.toggle()
 
     def _exit_fullscreen(self):
-        if not self.isFullScreen():
-            return
-        self._fullscreen_idle_timer.stop()
-        self._unfloat_controls_bar()
-        self.video_frame.unsetCursor()
-        self.showNormal()
-        self.playlist_dock.setVisible(self._dock_was_visible)
-        self.menuBar().setVisible(True)
-        self.statusBar().setVisible(self._status_bar_was_visible)
-        self._set_action_icon(self.act_fullscreen, "fullscreen")
+        self.fullscreen.exit()
 
-    # -- controlador de pantalla completa ----------------------------------
-    def _float_controls_bar(self):
-        """En pantalla completa la barra normal se oculta y aparece el
-        controlador dedicado, en su ventana superpuesta (_controls_overlay;
-        ver OverlayWindow: un hijo de video_frame quedaria debajo de la
-        ventana de video de libVLC), solo cuando hay actividad de mouse."""
-        self.controls_bar.hide()
-        self._fullscreen_active = True
-        self._controls_overlay.hide()
-
-    def _unfloat_controls_bar(self):
-        self._fullscreen_active = False
-        self._controls_overlay.hide()
-        self.controls_bar.show()
-
-    def _controls_are_floating(self) -> bool:
-        return getattr(self, "_fullscreen_active", False)
-
-    def _reposition_floating_controls(self):
-        if self._controls_are_floating():
-            self._reposition_overlays()
-
-    def _show_floating_controls(self):
-        if not self._controls_are_floating():
-            return
-        self._reposition_floating_controls()
-        if self._overlays_allowed():
-            self._controls_overlay.show()
-
-    def _hide_floating_controls(self):
-        if self._controls_are_floating():
-            self._controls_overlay.hide()
-            # Sin actividad en pantalla completa tambien se oculta el cursor
-            # sobre el video (se restaura con el siguiente movimiento).
-            self.video_frame.setCursor(Qt.CursorShape.BlankCursor)
-
-    def _on_fullscreen_mouse_activity(self):
-        if not self.isFullScreen():
-            return
-        self.video_frame.unsetCursor()
-        self._show_floating_controls()
-        self._fullscreen_idle_timer.start()
+    def _on_fullscreen_entered(self):
+        self._set_action_icon(self.act_fullscreen, "fullscreen_exit")
+        self.update_ui()
 
     def eventFilter(self, obj, event):
         if (
             event.type() == QEvent.Type.ShortcutOverride
-            and obj is self.playlist_widget
+            and obj is getattr(self, "playlist_view", None)
             and playlist_owns_key(event)
         ):
             # Aceptar el ShortcutOverride hace que Qt entregue la tecla al
@@ -2505,7 +2147,7 @@ class MainWindow(QMainWindow):
             event.accept()
             return True
         if event.type() == QEvent.Type.MouseMove and self.isFullScreen():
-            self._on_fullscreen_mouse_activity()
+            self.fullscreen.on_mouse_activity()
         if obj is self.video_frame and event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
             # Cambia el area de video sin que se mueva/redimensione la
             # ventana (p. ej. al mostrar/ocultar la lista).
@@ -2529,12 +2171,7 @@ class MainWindow(QMainWindow):
         dropped = []
         for url in event.mimeData().urls():
             dropped.append(url.toLocalFile() if url.isLocalFile() else url.toString())
-        entries = filter_dropped([d for d in dropped if d])
-        if entries:
-            start_index = self.playlist_widget.count()
-            self.add_files_to_playlist(entries)
-            if self.current_index == -1:
-                self.play_index(start_index)
+        self._add_and_maybe_play(filter_dropped([d for d in dropped if d]))
         event.acceptProposedAction()
 
     # ------------------------------------------------------------ misc
@@ -2573,19 +2210,17 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         # Eventos de libVLC que lleguen encolados ya no deben tocar nada.
         self.player.events.blockSignals(True)
-        for timer in (self._ab_timer, self._capture_timer, self._stall_timer, self._metadata_timer,
-                      self._preview_idle_timer):
+        for timer in (self._ab_timer, self._stall_timer):
             timer.stop()
+        self.preview.stop_timers()
         # Los hilos de subtitulos que sigan en marcha no deben destruirse
         # corriendo (error fatal de Qt): se espera un poco a que terminen.
         wait_for_subtitle_jobs(3000)
-        self._metadata_probe.close()
+        self.playlist.close()
         # Liberar libVLC (vout y salida de audio) antes de que Qt destruya
         # los widgets nativos donde dibuja.
         self.player.close()
-        remove_quietly(self._preview_snapshot_path)
-        if self._preview_popup is not None:
-            self._preview_popup.close()
+        self.preview.close()
         self._hide_overlays()
         app = QApplication.instance()
         if app is not None:

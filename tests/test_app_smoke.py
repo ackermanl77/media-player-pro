@@ -28,7 +28,7 @@ def test_main_window_builds_without_error(qapp):
     window = MainWindow()
     try:
         assert window.windowTitle() == "Reproductor Multimedia Pro"
-        assert window.playlist_widget.count() == 0
+        assert window.playlist.count() == 0
     finally:
         window.close()
 
@@ -37,7 +37,7 @@ def test_playlist_and_ui_wiring_smoke(qapp):
     window = MainWindow()
     try:
         window.add_files_to_playlist(["C:/fake/song.mp3", "https://example.com/stream.mp3"])
-        assert window.playlist_widget.count() == 2
+        assert window.playlist.count() == 2
 
         # Ejercitan los mismos caminos de codigo que fallaron antes por usar
         # una API de python-vlc/PySide6 equivocada (ver historial del proyecto).
@@ -112,7 +112,7 @@ def test_open_recent_file_warns_about_a_missing_local_file(qapp, monkeypatch, tm
         monkeypatch.setattr(main_window_module.QMessageBox, "warning", lambda *a, **k: None)
         window.open_recent_file("C:/definitely/not/a/real/file.mp4")
         # No debe haberse agregado a la playlist ni intentado reproducir.
-        assert window.playlist_widget.count() == 0
+        assert window.playlist.count() == 0
         assert window.current_index == -1
     finally:
         window.close()
@@ -124,9 +124,9 @@ def test_hover_preview_wiring_does_not_crash_without_a_loaded_track(qapp):
     window = MainWindow()
     try:
         # Sin pista actual, el hover debe ser un no-op silencioso.
-        window._on_slider_hovered(0.5, QPoint(100, 100))
-        assert not window._preview_hover_timer.isActive()
-        window._on_slider_hover_ended()
+        window.preview.on_hovered(0.5, QPoint(100, 100))
+        assert not window.preview.hover_timer.isActive()
+        window.preview.on_hover_ended()
     finally:
         window.close()
 
@@ -142,13 +142,13 @@ def test_hover_preview_debounce_timer_starts_once_a_track_is_current(qapp):
         monkeypatch_length = window.player.get_length_ms
         window.player.get_length_ms = lambda: 60000
         try:
-            window._on_slider_hovered(0.3, QPoint(50, 50))
-            assert window._preview_hover_timer.isActive()
-            assert window._pending_hover_fraction == 0.3
+            window.preview.on_hovered(0.3, QPoint(50, 50))
+            assert window.preview.hover_timer.isActive()
+            assert window.preview.pending_fraction == 0.3
         finally:
             window.player.get_length_ms = monkeypatch_length
-        window._on_slider_hover_ended()
-        assert not window._preview_hover_timer.isActive()
+        window.preview.on_hover_ended()
+        assert not window.preview.hover_timer.isActive()
     finally:
         window.close()
 
@@ -163,15 +163,15 @@ def test_hover_preview_popup_shows_a_formatted_timestamp(qapp):
         window.add_files_to_playlist(["C:/fake/song.mp3"])
         window.current_index = 0
         window.player.get_length_ms = lambda: 60000
-        window._pending_hover_fraction = 0.5
-        window._pending_hover_pos = QPoint(100, 100)
-        window._show_hover_preview()
+        window.preview.pending_fraction = 0.5
+        window.preview.pending_pos = QPoint(100, 100)
+        window.preview.show_preview()
         try:
-            assert window._preview_popup is not None
-            assert window._preview_popup.isVisible()
-            assert window._preview_time_label.text() == format_time(30000)
+            assert window.preview.popup is not None
+            assert window.preview.popup.isVisible()
+            assert window.preview.time_label.text() == format_time(30000)
         finally:
-            window._hide_hover_preview()
+            window.preview.hide()
     finally:
         window.close()
 
@@ -255,13 +255,13 @@ def test_fullscreen_uses_a_dedicated_controller_in_its_own_overlay_window(qapp):
     window = MainWindow()
     try:
         controller = window.fullscreen_controller
-        assert controller.parentWidget() is window._controls_overlay
+        assert controller.parentWidget() is window.fullscreen.overlay
         window.toggle_fullscreen()
         try:
-            assert window._controls_overlay.isWindow()
+            assert window.fullscreen.overlay.isWindow()
             assert window.controls_bar.isHidden()
-            assert controller.isVisibleTo(window._controls_overlay)
-            assert window._fullscreen_idle_timer.isActive()
+            assert controller.isVisibleTo(window.fullscreen.overlay)
+            assert window.fullscreen.idle_timer.isActive()
             # Mismos QAction que los menus: sin estado duplicado.
             assert controller.buttons["play"].defaultAction() is window.act_play_pause
             assert controller.buttons["fullscreen"].defaultAction() is window.act_fullscreen
@@ -269,8 +269,8 @@ def test_fullscreen_uses_a_dedicated_controller_in_its_own_overlay_window(qapp):
         finally:
             window._exit_fullscreen()
         assert not window.controls_bar.isHidden()
-        assert window._controls_overlay.isHidden()
-        assert not window._fullscreen_idle_timer.isActive()
+        assert window.fullscreen.overlay.isHidden()
+        assert not window.fullscreen.idle_timer.isActive()
     finally:
         window.close()
 
@@ -302,12 +302,12 @@ def test_fullscreen_idle_timeout_hides_the_floating_controller(qapp):
         window.show()
         window.toggle_fullscreen()
         try:
-            assert window._controls_overlay.isVisible()
-            window._fullscreen_idle_timer.timeout.emit()
-            assert not window._controls_overlay.isVisible()
+            assert window.fullscreen.overlay.isVisible()
+            window.fullscreen.idle_timer.timeout.emit()
+            assert not window.fullscreen.overlay.isVisible()
             # Nueva actividad de mouse vuelve a mostrarlo.
-            window._on_fullscreen_mouse_activity()
-            assert window._controls_overlay.isVisible()
+            window.fullscreen.on_mouse_activity()
+            assert window.fullscreen.overlay.isVisible()
         finally:
             window._exit_fullscreen()
     finally:
@@ -317,8 +317,8 @@ def test_fullscreen_idle_timeout_hides_the_floating_controller(qapp):
 def test_fullscreen_mouse_activity_is_a_no_op_outside_fullscreen(qapp):
     window = MainWindow()
     try:
-        window._on_fullscreen_mouse_activity()
-        assert not window._fullscreen_idle_timer.isActive()
+        window.fullscreen.on_mouse_activity()
+        assert not window.fullscreen.idle_timer.isActive()
     finally:
         window.close()
 
@@ -330,16 +330,16 @@ def test_event_filter_only_reacts_to_mouse_move_while_fullscreen(qapp):
     try:
         move_event = QEvent(QEvent.Type.MouseMove)
         window.eventFilter(window.video_frame, move_event)
-        assert not window._fullscreen_idle_timer.isActive()
+        assert not window.fullscreen.idle_timer.isActive()
 
         window.show()
         window.toggle_fullscreen()
         try:
-            window._hide_floating_controls()
-            assert not window._controls_overlay.isVisible()
+            window.fullscreen.hide_controls()
+            assert not window.fullscreen.overlay.isVisible()
             move_event2 = QEvent(QEvent.Type.MouseMove)
             window.eventFilter(window.video_frame, move_event2)
-            assert window._controls_overlay.isVisible()
+            assert window.fullscreen.overlay.isVisible()
         finally:
             window._exit_fullscreen()
     finally:
