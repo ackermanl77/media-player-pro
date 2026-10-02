@@ -18,7 +18,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       # VLC (libvlc) y las librerias minimas de Qt son necesarias para que
       # tests/test_app_smoke.py pueda importar `vlc` y construir una
@@ -35,10 +37,51 @@ jobs:
           sudo apt-get install -y vlc vlc-plugin-visualization libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 xvfb
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
       - name: Compile check
         run: python -m compileall -q player run.py
 
       - name: Run tests
-        run: xvfb-run --auto-servernum python -m pytest -q
+        run: xvfb-run --auto-servernum python -m pytest -q --timeout=120
+
+  # Las rutas especificas de Windows (ventana de video de libVLC, rutas con
+  # "\", path_key sin distinguir mayusculas, shutdown.exe) se omiten o no
+  # existen en Ubuntu. Mismo Python que el desarrollo local (3.14) y que el
+  # build del .exe (3.12).
+  test-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # VLC de 64 bits (aporta libvlc.dll; python-vlc lo encuentra por el
+      # registro). Sin version fija: se registra cual quedo instalada.
+      - name: Install VLC
+        run: choco install vlc -y --no-progress
+        shell: pwsh
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Show libVLC version
+        run: python -c "import vlc; print(vlc.libvlc_get_version())"
+
+      - name: Compile check
+        run: python -m compileall -q player run.py
+
+      - name: Run tests
+        run: python -m pytest -q --timeout=120

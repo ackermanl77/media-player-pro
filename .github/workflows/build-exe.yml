@@ -1,15 +1,24 @@
 name: Build Windows EXE
 
+# Solo se construye si el workflow "CI" (Ubuntu + Windows 3.12/3.14) paso
+# para ese mismo commit: un .exe nunca sale de un commit con pruebas rotas.
+# workflow_dispatch (manual) sigue disponible y no espera al CI.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main, master]
   workflow_dispatch:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # En workflow_run, el commit que probo el CI (no el ultimo de la rama).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-python@v7
         with:
@@ -17,24 +26,27 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirements-build.txt
 
-      # PyInstaller no ejecuta `import vlc` durante el analisis de
-      # dependencias en la mayoria de los casos, pero instalar VLC aqui
-      # evita cualquier sorpresa si algun hook llegara a necesitarlo, y deja
-      # el runner en el mismo estado que una maquina de desarrollo real.
-      - name: Install VLC
+      # Sin VLC: PyInstaller no lo necesita (el .exe usa el VLC del equipo
+      # del usuario; BUNDLE_VLC=1 en el spec es opcional y local).
+      - name: Install build dependencies
+        run: pip install -r requirements-build.txt -c constraints.txt
+
+      # Carpeta onedir: dist/ReproductorMultimediaPro/
+      - name: Build application folder
+        run: pyinstaller --noconfirm ReproductorMultimediaPro.spec
+
+      # Inno Setup 6 viene instalado en windows-latest.
+      - name: Build installer
         run: |
-          winget install --id VideoLAN.VLC -e --silent --accept-package-agreements --accept-source-agreements
+          $version = python -c "import player; print(player.__version__)"
+          iscc /DAppVersion=$version installer\ReproductorMultimediaPro.iss
         shell: pwsh
 
-      - name: Install build dependencies
-        run: pip install -r requirements-build.txt
-
-      - name: Build executable
-        run: pyinstaller ReproductorMultimediaPro.spec
-
-      - name: Upload executable as artifact
+      - name: Upload installer and app folder
         uses: actions/upload-artifact@v7
         with:
           name: ReproductorMultimediaPro-windows
-          path: dist/ReproductorMultimediaPro.exe
+          path: |
+            dist/installer/*.exe
+            dist/ReproductorMultimediaPro/
           retention-days: 30

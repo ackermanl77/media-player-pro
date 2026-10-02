@@ -9,10 +9,21 @@ GitHub Actions.
 ## Correr los tests localmente
 
 ```bash
+pip install -r requirements-dev.txt   # pytest y pytest-timeout (ya no estan en requirements.txt)
 python -m pytest -q
 ```
 
-- `tests/test_formats.py`: funciones puras, sin VLC ni Qt.
+El CI agrega `--timeout=120` (pytest-timeout): una prueba colgada en libVLC
+falla en vez de trabar el job.
+
+- `tests/test_formats.py`, `test_inputs.py`, `test_vlc_check.py`,
+  `test_playlist_order.py`, `test_settings.py`: funciones puras, sin VLC ni Qt.
+- `tests/test_p2_features.py`: eventos de libVLC, capítulos (con
+  `tests/assets/chapters.mkv`, un video de 6 s y 30 KB generado con ffmpeg),
+  desfase de audio, streams (servidor HTTP local), atajos, lista, tema.
+- `tests/test_single_instance.py`: la segunda instancia es un proceso real
+  que le pasa sus archivos a la primera por `QLocalServer`.
+- `tests/test_subtitle_lifecycle.py`: hilos de subtítulos sin red.
 - `tests/test_backend.py`, `tests/test_visualizer.py`: contra un VLC real
   (usan `player.backend.VLCPlayer` de verdad, no mocks). Se **omiten**
   automáticamente (no fallan) si `import vlc` lanza `OSError` — es decir,
@@ -21,10 +32,25 @@ python -m pytest -q
   plataforma Qt `QT_QPA_PLATFORM=offscreen` (no necesita pantalla). También
   se omite si no hay VLC.
 
+`tests/conftest.py` (autouse) redirige `Path.home()` y `%LOCALAPPDATA%` a
+carpetas temporales en todas las pruebas: construir/cerrar `MainWindow`
+lee y escribe `settings.json`/`session.json`, y ninguna prueba debe tocar
+el estado real del usuario. `tests/test_video_input.py` crea una ventana
+Win32 **oculta** (nunca se muestra, sin entrada simulada) para comprobar que
+la ventana de video de libVLC queda deshabilitada; solo corre en Windows.
+
 ## CI (GitHub Actions)
 
-`.github/workflows/ci.yml` corre en `ubuntu-latest` en cada push/PR a
-`main`/`master`. Tres cosas que este runner necesita y que un entorno de
+`.github/workflows/ci.yml` tiene dos jobs en cada push/PR a
+`main`/`master`: `test-windows` (`windows-latest`, Python 3.12 y 3.14, VLC
+instalado con `choco`, Qt `offscreen`) y `test` en `ubuntu-latest`.
+`.github/workflows/build-exe.yml` ya no corre en cada push: se dispara con
+`workflow_run` cuando "CI" termina con éxito para un push (o a mano con
+`workflow_dispatch`), y construye exactamente el commit probado. El job de
+Windows todavía no se ejecutó en GitHub (se agregó sin poder correrlo);
+revisar la primera ejecución.
+
+El job de Ubuntu: Tres cosas que este runner necesita y que un entorno de
 escritorio normal no:
 
 1. **`vlc-plugin-visualization`** además de `vlc`: el filtro "visual" que
