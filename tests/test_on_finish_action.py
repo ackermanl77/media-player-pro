@@ -55,31 +55,64 @@ def test_exit_action_closes_the_window_without_touching_the_system(qapp, fake_su
     assert not window.isVisible()
 
 
-def test_shutdown_action_calls_shutdown_with_a_delay(qapp, fake_subprocess_run):
+windows_only = pytest.mark.skipif(not sys.platform.startswith("win"), reason="shutdown.exe es de Windows")
+
+
+@windows_only
+@pytest.mark.parametrize("action, command", [
+    ("shutdown", ["shutdown", "/s", "/t", "0"]),
+    ("hibernate", ["shutdown", "/h"]),
+    ("restart", ["shutdown", "/r", "/t", "0"]),
+])
+def test_power_actions_wait_for_an_in_app_countdown(qapp, fake_subprocess_run, action, command):
+    # Antes: hibernar era inmediato y apagar/reiniciar solo se cancelaban con
+    # "shutdown /a" en una consola. Ahora nada se ejecuta hasta que termina
+    # una cuenta regresiva propia, cancelable.
+    window = MainWindow()
+    try:
+        window.on_finish_action = action
+        window._handle_playlist_finished()
+        dialog = window._power_dialog
+        assert dialog is not None and dialog.isVisible()
+        assert fake_subprocess_run == []
+        assert dialog.btn_cancel.isDefault()
+        assert "60 s" in dialog.label.text()
+        # La accion se consume: no se repite al terminar otra lista.
+        assert window.on_finish_action == "none"
+        for _ in range(59):
+            dialog.tick()
+        assert fake_subprocess_run == []
+        assert "1 s" in dialog.label.text()
+        dialog.tick()
+        assert fake_subprocess_run == [command]
+    finally:
+        window.close()
+
+
+@windows_only
+def test_cancelling_the_countdown_runs_nothing(qapp, fake_subprocess_run):
     window = MainWindow()
     try:
         window.on_finish_action = "shutdown"
         window._handle_playlist_finished()
-        assert fake_subprocess_run == [["shutdown", "/s", "/t", "60"]]
+        dialog = window._power_dialog
+        dialog.btn_cancel.click()
+        for _ in range(70):
+            dialog.tick()
+        assert fake_subprocess_run == []
+        assert window._power_dialog is None
+        assert "cancelada" in window.statusBar().currentMessage()
     finally:
         window.close()
 
 
-def test_hibernate_action_calls_shutdown_h(qapp, fake_subprocess_run):
-    window = MainWindow()
-    try:
-        window.on_finish_action = "hibernate"
-        window._handle_playlist_finished()
-        assert fake_subprocess_run == [["shutdown", "/h"]]
-    finally:
-        window.close()
-
-
-def test_restart_action_calls_shutdown_with_a_delay(qapp, fake_subprocess_run):
+@windows_only
+def test_shutdown_now_button_skips_the_wait(qapp, fake_subprocess_run):
     window = MainWindow()
     try:
         window.on_finish_action = "restart"
         window._handle_playlist_finished()
-        assert fake_subprocess_run == [["shutdown", "/r", "/t", "60"]]
+        window._power_dialog.btn_now.click()
+        assert fake_subprocess_run == [["shutdown", "/r", "/t", "0"]]
     finally:
         window.close()

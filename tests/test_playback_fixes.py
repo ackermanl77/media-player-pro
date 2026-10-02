@@ -58,8 +58,11 @@ def _wav(path, seconds):
 
 
 def _pump_until(window, predicate, timeout_s=8.0):
+    # processEvents: los fines de pista llegan como eventos de libVLC
+    # encolados en Qt (ver MainWindow._connect_player_events).
     deadline = time.time() + timeout_s
     while time.time() < deadline:
+        QApplication.processEvents()
         window.update_ui()
         if predicate():
             return True
@@ -101,7 +104,8 @@ def test_broken_files_stop_after_one_full_pass(window, headless, repeat_mode):
     window.play_index = lambda index, user=True: (calls.append(index), original(index, user))
     window.play_index(0)
     time.sleep(4.0)  # tiempo de sobra para decenas de reintentos con el bug viejo
-    for _ in range(40):
+    for _ in range(60):
+        QApplication.processEvents()
         window.update_ui()
         time.sleep(0.1)
     assert calls == [0, 1]
@@ -120,7 +124,7 @@ def test_a_broken_track_is_skipped_even_with_repeat_one(window, headless):
 # ------------------------------------------------- 3. aleatorio termina
 def test_shuffle_with_repeat_none_ends_the_playlist(window):
     window.add_files_to_playlist([f"C:/fake/{i}.mp3" for i in range(4)])
-    window.btn_shuffle.setChecked(True)
+    window.act_shuffle.setChecked(True)
     played = []
     window.play_index = lambda index, user=True: (played.append(index), setattr(window, "current_index", index),
                                                   window.order.jump_to(index))
@@ -235,14 +239,19 @@ def _headless_player(monkeypatch):
 def test_recreating_the_instance_releases_old_objects_and_keeps_zoom(monkeypatch):
     player = _headless_player(monkeypatch)
     player.set_video_scale(2.0)
-    player._ensure_preview_player()
+    preview = player._ensure_preview_player()
     released = []
-    for name, obj in (("mp", player.media_player), ("preview", player._preview_player), ("instance", player.instance)):
+    for name, obj in (("mp", player.media_player), ("preview", preview), ("instance", player.instance)):
         original = obj.release
         monkeypatch.setattr(obj, "release", lambda n=name, o=original: (released.append(n), o()))
     player._create_instance(visualizer=False)
-    assert sorted(released) == ["instance", "mp", "preview"]
+    # El de vista previa tiene su propia Instance liviana: recrear la
+    # principal ya no lo toca.
+    assert sorted(released) == ["instance", "mp"]
+    assert player._preview_player is preview
     assert player.media_player.video_get_scale() == pytest.approx(2.0)
+    player.close()
+    assert sorted(released) == ["instance", "mp", "preview"]
 
 
 def test_reload_preserving_state_keeps_position_pause_delay_and_external_subs(monkeypatch, tmp_path):

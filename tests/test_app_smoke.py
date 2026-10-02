@@ -248,34 +248,66 @@ def test_step_frame_shows_osd_on_a_successful_frame_advance(qapp):
 
 
 # ---------------------------------------------------- fullscreen controls
-def test_toggle_fullscreen_floats_controls_bar_onto_the_video_frame(qapp):
+def test_fullscreen_uses_a_dedicated_controller_in_its_own_overlay_window(qapp):
+    # Ni hijo de video_frame (quedaba debajo de la ventana de video de
+    # libVLC) ni la barra normal reparentada: un controlador propio (titulo,
+    # tiempos, barra grande, pocos botones) en una ventana superpuesta.
     window = MainWindow()
     try:
-        assert window.controls_bar.parent() is not window.video_frame
+        controller = window.fullscreen_controller
+        assert controller.parentWidget() is window._controls_overlay
         window.toggle_fullscreen()
         try:
-            assert window.controls_bar.parent() is window.video_frame
-            assert window.controls_bar.isVisible()
+            assert window._controls_overlay.isWindow()
+            assert window.controls_bar.isHidden()
+            assert controller.isVisibleTo(window._controls_overlay)
             assert window._fullscreen_idle_timer.isActive()
+            # Mismos QAction que los menus: sin estado duplicado.
+            assert controller.buttons["play"].defaultAction() is window.act_play_pause
+            assert controller.buttons["fullscreen"].defaultAction() is window.act_fullscreen
+            assert set(controller.buttons) == {"previous", "play", "stop", "next", "mute", "fullscreen"}
         finally:
             window._exit_fullscreen()
-        assert window.controls_bar.parent() is not window.video_frame
+        assert not window.controls_bar.isHidden()
+        assert window._controls_overlay.isHidden()
         assert not window._fullscreen_idle_timer.isActive()
     finally:
         window.close()
 
 
-def test_fullscreen_idle_timeout_hides_the_floating_controls_bar(qapp):
+def test_fullscreen_controller_shows_title_times_and_position(qapp):
     window = MainWindow()
     try:
+        window.add_files_to_playlist(["C:/fake/pelicula.mkv"])
+        window.current_index = 0
+        window.player.get_length_ms = lambda: 120_000
+        window.player.get_time_ms = lambda: 30_000
+        window.player.get_position = lambda: 0.25
         window.toggle_fullscreen()
         try:
-            assert window.controls_bar.isVisible()
+            window.update_ui()
+            c = window.fullscreen_controller
+            assert c.title_label.text().endswith("pelicula.mkv")
+            assert (c.time_label.text(), c.total_label.text()) == ("00:30", "02:00")
+            assert c.slider.value() == 250
+        finally:
+            window._exit_fullscreen()
+    finally:
+        window.close()
+
+
+def test_fullscreen_idle_timeout_hides_the_floating_controller(qapp):
+    window = MainWindow()
+    try:
+        window.show()
+        window.toggle_fullscreen()
+        try:
+            assert window._controls_overlay.isVisible()
             window._fullscreen_idle_timer.timeout.emit()
-            assert not window.controls_bar.isVisible()
-            # Nueva actividad de mouse vuelve a mostrarla.
+            assert not window._controls_overlay.isVisible()
+            # Nueva actividad de mouse vuelve a mostrarlo.
             window._on_fullscreen_mouse_activity()
-            assert window.controls_bar.isVisible()
+            assert window._controls_overlay.isVisible()
         finally:
             window._exit_fullscreen()
     finally:
@@ -300,13 +332,14 @@ def test_event_filter_only_reacts_to_mouse_move_while_fullscreen(qapp):
         window.eventFilter(window.video_frame, move_event)
         assert not window._fullscreen_idle_timer.isActive()
 
+        window.show()
         window.toggle_fullscreen()
         try:
             window._hide_floating_controls()
-            assert not window.controls_bar.isVisible()
+            assert not window._controls_overlay.isVisible()
             move_event2 = QEvent(QEvent.Type.MouseMove)
             window.eventFilter(window.video_frame, move_event2)
-            assert window.controls_bar.isVisible()
+            assert window._controls_overlay.isVisible()
         finally:
             window._exit_fullscreen()
     finally:
