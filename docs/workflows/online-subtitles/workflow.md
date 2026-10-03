@@ -17,7 +17,9 @@ se sube a git).
 ## Uso
 
 **Menú Video → "Buscar subtítulos online..."**. Solo funciona con
-archivos locales (no con streams por URL). Al abrir el diálogo:
+archivos locales (no con streams por URL). El campo "Idiomas" toma
+códigos ISO separados por comas (p. ej. `es,en,pt-br`) y se recuerda. Al
+abrir el diálogo:
 
 1. Busca automáticamente por el hash del archivo (el mismo algoritmo que
    usa BS.Player y muchos otros reproductores: tamaño + suma de los
@@ -28,8 +30,13 @@ archivos locales (no con streams por URL). Al abrir el diálogo:
 3. Los resultados se listan ordenados por número de descargas — normalmente
    una buena señal de calidad/precisión de sincronía.
 4. Selecciona uno y "Descargar y usar": se guarda junto al video (mismo
-   nombre + `.<idioma>.srt`) o, si esa carpeta no es escribible, en una
-   carpeta temporal — y se carga inmediatamente sobre el video actual.
+   nombre + `.<idioma>` + la extensión del subtítulo descargado, p. ej.
+   `.es.srt` o `.es.ass`; pregunta antes de reemplazar uno existente) o,
+   si esa carpeta no es escribible, en un archivo temporal — y se carga
+   inmediatamente sobre el video actual. El diálogo muestra las descargas
+   que quedan en el día según la API. Si la descarga termina cuando ya
+   suena otro archivo, no se carga sobre ese: queda guardada para cuando
+   se vuelva a abrir el original.
 
 Toda llamada de red corre en un `QThread` separado, así que la interfaz no
 se congela mientras busca o descarga.
@@ -43,11 +50,14 @@ No se envía nada más (ni la ruta completa, ni metadatos del sistema).
 
 ## Validación
 
-`tests/test_opensubtitles.py` (9 tests) cubre el algoritmo de hash con
+`tests/test_opensubtitles.py` cubre el algoritmo de hash con
 vectores construidos a mano (un archivo de ceros, un archivo con bytes
 conocidos en los bordes, un archivo demasiado chico) y el parseo de
 respuestas/manejo de errores de red con `requests.get`/`.post`
 reemplazados — **nunca golpea la API real** durante la suite automatizada.
+`tests/test_subtitle_lifecycle.py` cubre los hilos de búsqueda/descarga
+(resultado ligado al video de origen, errores siempre informados, cierre
+de la app con hilos en marcha) sin red.
 
 Verificado además en vivo, de punta a punta, contra la API real de
 OpenSubtitles (con una API key real): búsqueda por texto ("The Matrix

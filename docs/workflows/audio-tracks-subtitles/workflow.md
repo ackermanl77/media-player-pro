@@ -17,6 +17,11 @@ externo cuando el video no trae uno embebido.
   elegir un archivo `.srt`/`.ass`/`.ssa`/`.sub`/`.vtt` y lo carga sobre el
   video actual (`video_set_subtitle_file`).
 
+La pista de audio y la de subtítulos elegidas se **recuerdan por
+archivo** (en `positions.json`, ver
+[recordar posición](../resume-playback/workflow.md)) y se restauran la
+próxima vez que se reproduce ese archivo; no se aplica a streams por URL.
+
 Ambos submenús solo tienen sentido mientras hay un archivo cargado con más
 de una pista disponible; si el archivo actual solo trae una pista de audio
 y no tiene subtítulos, los submenús aparecen prácticamente vacíos (solo la
@@ -25,7 +30,9 @@ opción "Disable" que libVLC siempre reporta).
 ## Sincronía de subtítulos (inspirado en BS.Player)
 
 **Menú Video → "Adelantar/Retrasar subtítulos 50 ms"** (atajos `G`/`H`) o
-**"Restablecer sincronía..."**. Ajusta `video_set_spu_delay()` en vivo —
+**"Restablecer sincronía de subtítulos"**. El desfase del audio funciona
+igual (Audio → "Adelantar/Retrasar audio 50 ms", `J`/`K`). Ninguno de los
+dos desfases se recuerda por archivo. Ajusta `video_set_spu_delay()` en vivo —
 efecto inmediato, no requiere recargar nada. Útil cuando un subtítulo
 descargado por separado no está perfectamente alineado con el audio.
 
@@ -35,10 +42,10 @@ descargado por separado no está perfectamente alineado con el audio.
 Grande 150% / Muy grande 200%). A diferencia del delay, `--sub-text-scale`
 es una opción de **instancia** de libVLC (mismo caso que el visualizador de
 audio — ver `docs/PROJECT_STATUS.md` → "Architecture"), así que cambiarlo
-recarga el archivo actual internamente (`VLCPlayer.load()` recrea el
-`Instance`); `MainWindow._on_subtitle_scale_changed()` preserva la
-posición de reproducción y si estaba en pausa, para que el cambio se vea
-transparente. No incluye color ni tipografía — deliberadamente fuera de
+recarga el archivo actual internamente con
+`VLCPlayer.reload_preserving_state()` (recrea el `Instance` y conserva
+posición, pausa, pistas, subtítulo externo, desfases, A-B y marcadores),
+para que el cambio se vea transparente. No incluye color ni tipografía — deliberadamente fuera de
 alcance para mantener la superficie de la función acotada.
 
 ## Validación

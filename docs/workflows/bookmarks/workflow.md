@@ -21,16 +21,16 @@ abrió: cambiar de pista lo cierra automáticamente (los marcadores de un
 archivo no tienen sentido mostrados sobre otro).
 
 Cada marcador del archivo actual aparece como una línea dorada sobre la
-barra de progreso (recalculadas en cada tick de `update_ui()`, ver
+barra de progreso (recalculadas al cambiar de pista o de marcadores, ver
 [docs/workflows/ab-loop/workflow.md](../ab-loop/workflow.md) para el
 mecanismo de dibujo, compartido con los puntos A/B), sin necesidad de
 abrir el diálogo para saber dónde están.
 
 ## Dónde viven
 
-`~/.reproductor_multimedia_pro/bookmarks.json` — `{"ruta_absoluta":
-[{"name": ..., "position_ms": ...}, ...]}`. Se puede borrar sin riesgo
-para resetear todos los marcadores.
+`~/.reproductor_multimedia_pro/bookmarks.json` — `{"ruta normalizada":
+[{"name": ..., "position_ms": ...}, ...]}` (escritura atómica con copia
+`.bak`). Se puede borrar sin riesgo para resetear todos los marcadores.
 
 ## Cómo funciona por dentro
 

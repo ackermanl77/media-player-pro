@@ -10,13 +10,16 @@ Antes era un `.exe` de un solo archivo ("onefile"): en cada arranque el
 bootloader extraía ~124 MB a `%TEMP%\_MEI...` y los borraba al salir (y
 quedaban restos tras un cierre forzado). Onedir arranca directo.
 
-> **Estado (2026-10-01):** build onedir local verificado (Python 3.14,
-> versiones de `constraints.txt`): 77,9 MB / 201 archivos, arranca y carga el
-> VLC del sistema; el recorte de Qt ahorra ~40 MB (118,0 MB sin él). La
-> variante `BUNDLE_VLC=1` (+ `plugins.dat`) pesa 182,5 MB y arranca usando
-> solo el libVLC incluido. **Falta:** compilar e instalar el instalador
-> (no había Inno Setup en la máquina del build) y la verificación manual de
-> abajo (reproducir, "Abrir con", desinstalar).
+> **Estado (2026-10-03):** build onedir local verificado (2026-10-01,
+> Python 3.14, versiones de `constraints.txt`): 77,9 MB / 201 archivos,
+> arranca y carga el VLC del sistema; el recorte de Qt ahorra ~40 MB
+> (118,0 MB sin él). La variante `BUNDLE_VLC=1` (+ `plugins.dat`) pesa
+> 182,5 MB y arranca usando solo el libVLC incluido. El instalador se
+> compiló y se probó la instalación y desinstalación silenciosas (la
+> desinstalación ya no deja la clave vacía `HKCU\Software\ReproductorMultimediaPro`).
+> `build-exe.yml` construyó carpeta e instalador en GitHub (2026-10-03).
+> **Falta:** la verificación manual interactiva de abajo (reproducir desde
+> el instalado, "Abrir con").
 
 ## Versión
 
@@ -32,10 +35,11 @@ La única fuente es `player/__init__.py` (`__version__`). De ahí la toman:
 Para publicar una versión: subir `__version__`, commit, y luego
 `git tag v<version>` + `git push origin v<version>`.
 
-> **Estado (2026-10-02):** el recurso de versión se verificó con un build
+> **Estado (2026-10-03):** el recurso de versión se verificó con un build
 > local (PyInstaller 6.22, Python 3.14): `ProductVersion`/`FileVersion`
 > 0.1.0, "Reproductor Multimedia Pro", idioma español. El workflow de
-> release no se ejecutó todavía en GitHub.
+> release no se ejecutó todavía en GitHub (el Release `v0.1.0` existente,
+> del 2026-09-19, es anterior a él y trae el antiguo `.exe` onefile).
 
 ## Release (etiqueta `v*`)
 
@@ -100,8 +104,11 @@ generar `plugins.dat` **después** del build, sobre la carpeta ya copiada:
 `"C:\Program Files\VideoLAN\VLC\vlc-cache-gen.exe" dist\ReproductorMultimediaPro\_internal\vlc\plugins`
 (un `plugins.dat` generado antes no sirve: PyInstaller no conserva la fecha
 de los DLL y libVLC descarta las entradas que no coinciden; Inno Setup sí
-las conserva al instalar). Distribuir libVLC obliga a cumplir su LGPL
-(incluir su licencia y un enlace al código fuente de VLC).
+las conserva al instalar). Distribuir libVLC obliga a cumplir su LGPL: el
+spec con `BUNDLE_VLC=1` copia `licenses/` (`THIRD_PARTY_NOTICES.txt` con el
+enlace al código fuente de VLC 3.0.23, `VLC-COPYING.txt` y
+`VLC-COPYING.LIB.txt`) a `_internal\licenses\`. Si se empaqueta otra versión
+de VLC, actualizar el enlace del tarball en `THIRD_PARTY_NOTICES.txt`.
 
 ## Instalador
 
@@ -110,7 +117,9 @@ las conserva al instalar). Distribuir libVLC obliga a cumplir su LGPL
 en el menú Inicio, desinstalador, y registra la app como "capacidad" de
 Windows para audio/video/.m3u (aparece en "Abrir con" y en Aplicaciones
 predeterminadas, sin adueñarse de ninguna extensión), con un verbo extra
-"Agregar a la lista de Reproductor Multimedia Pro" (`--enqueue`).
+"Agregar a la lista de Reproductor Multimedia Pro" (`--enqueue`). Copia
+también `licenses/` a `{app}\licenses`, y al desinstalar borra sus claves
+del registro (incluida la clave padre de `Capabilities` si quedó vacía).
 
 ## Verificar
 

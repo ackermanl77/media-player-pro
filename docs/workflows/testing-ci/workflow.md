@@ -13,6 +13,10 @@ pip install -r requirements-dev.txt   # pytest y pytest-timeout (ya no estan en 
 python -m pytest -q
 ```
 
+Resultado actual (2026-10-03, Windows 11, Python 3.14, libVLC 3.0.23):
+**319 passed**. Las pruebas que construyen ventanas fijan ellas mismas
+`QT_QPA_PLATFORM=offscreen`.
+
 El CI agrega `--timeout=120` (pytest-timeout): una prueba colgada en libVLC
 falla en vez de trabar el job.
 
@@ -35,6 +39,17 @@ falla en vez de trabar el job.
 - `tests/test_single_instance.py`: la segunda instancia es un proceso real
   que le pasa sus archivos a la primera por `QLocalServer`.
 - `tests/test_subtitle_lifecycle.py`: hilos de subtítulos sin red.
+- `tests/test_folder_scan.py`: escaneo de carpetas en segundo plano
+  (`player/folder_scan.py`): lotes en el orden de `scan_folder()`,
+  cancelación y señales entregadas en el hilo de la UI.
+- `tests/test_resume.py`, `test_bookmarks.py`, `test_recent_files.py`,
+  `test_persistence.py`, `test_opensubtitles.py`: módulos puros (posición
+  y pistas por archivo, marcadores, recientes, JSON atómico y `.m3u8`,
+  cliente de OpenSubtitles con `requests` simulado).
+- `tests/test_equalizer.py` (presets, pasos de 0,1 dB, diálogo),
+  `test_playback_fixes.py`, `test_preview_thumbnail.py`,
+  `test_on_finish_action.py` (sin ejecutar nunca `shutdown`),
+  `test_window_state.py`, `test_logs.py`: contra VLC/Qt reales.
 - `tests/test_backend.py`, `tests/test_visualizer.py`: contra un VLC real
   (usan `player.backend.VLCPlayer` de verdad, no mocks). Se **omiten**
   automáticamente (no fallan) si `import vlc` lanza `OSError` — es decir,
@@ -55,19 +70,22 @@ la ventana de video de libVLC queda deshabilitada; solo corre en Windows.
 `.github/workflows/ci.yml` tiene dos jobs en cada push/PR a
 `main`/`master`: `test-windows` (`windows-latest`, Python 3.12 y 3.14, VLC
 instalado con `choco`, Qt `offscreen`) y `test` en `ubuntu-latest`.
-`.github/workflows/build-exe.yml` ya no corre en cada push: se dispara con
-`workflow_run` cuando "CI" termina con éxito para un push (o a mano con
-`workflow_dispatch`), y construye exactamente el commit probado. El job de
-Windows todavía no se ejecutó en GitHub (se agregó sin poder correrlo);
-revisar la primera ejecución.
+Ambos corren `python -m compileall -q player run.py` y luego la suite con
+`--timeout=120`. `.github/workflows/build-exe.yml` ya no corre en cada
+push: se dispara con `workflow_run` cuando "CI" termina con éxito para un
+push (o a mano con `workflow_dispatch`), y construye exactamente el commit
+probado. Los tres jobs del CI y el build pasaron en GitHub el 2026-10-03
+(antes, el job de Ubuntu fallaba en pruebas de rutas `C:/...`, que en
+Linux son relativas, y en dos pruebas de opciones de GPU exclusivas de
+Windows, que ahora se omiten fuera de Windows).
 
 `.github/workflows/release.yml` se dispara al subir una etiqueta `v*`:
 llama a `ci.yml` entero (`workflow_call`) y solo si pasa construye,
 comprime y publica el Release (ver
-[docs/workflows/packaging/workflow.md](../packaging/workflow.md)). Tampoco
-se ejecutó todavía en GitHub.
+[docs/workflows/packaging/workflow.md](../packaging/workflow.md)). No se
+ejecutó todavía en GitHub (no se subió ninguna etiqueta desde que existe).
 
-El job de Ubuntu: Tres cosas que este runner necesita y que un entorno de
+El job de Ubuntu (Python 3.12) necesita tres cosas que un entorno de
 escritorio normal no:
 
 1. **`vlc-plugin-visualization`** además de `vlc`: el filtro "visual" que

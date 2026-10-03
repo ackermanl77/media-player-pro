@@ -15,7 +15,8 @@ player.backend.VLCPlayer (envoltorio delgado sobre python-vlc)
 libVLC (ctypes, vía python-vlc) -- decodifica y reproduce audio/video
         |
         v
-VLC media player (debe estar instalado aparte en la máquina; no se empaqueta)
+VLC media player 3.0 de 64 bits instalado en la máquina (o, con un build
+BUNDLE_VLC=1, el libVLC recortado dentro del paquete)
 ```
 
 `MainWindow` (`player/main_window.py`) arma la ventana (barra de
@@ -39,6 +40,8 @@ llamadas a un único `VLCPlayer`; no importa `vlc` (lee el estado como
   almacenado, ventanas superpuestas, controlador de pantalla completa),
   `equalizer_dialog.py`, `power.py`, `theme.py`, `url_dialog.py`,
   `single_instance.py`, `inputs.py`, `vlc_check.py`.
+- `player/folder_scan.py::FolderScanWorker`: recorre "Abrir carpeta" en un
+  `QThread` (lotes ordenados de `inputs.scan_folder_batches()`, cancelable).
 
 `VLCPlayer` (`player/backend.py`) es la única clase que toca `python-vlc`.
 Mantiene su propio `vlc.Instance`/`vlc.MediaPlayer`, y los **recrea** cuando
@@ -63,7 +66,13 @@ tener VLC instalado.
 | Ventana principal y todo el cableado de la UI | `player/main_window.py::MainWindow` |
 | Envoltorio sobre libVLC (transporte, volumen, pistas, ecualizador, visualizador) | `player/backend.py::VLCPlayer` |
 | Formatos soportados y helpers puros (tiempo, rutas, filtros de diálogo) | `player/formats.py` |
-| Posiciones de reproducción recordadas entre sesiones | `player/resume.py` |
+| Posición y pistas de audio/subtítulos recordadas por archivo | `player/resume.py` (`positions.json`) |
+| Escaneo de carpetas en segundo plano | `player/folder_scan.py::FolderScanWorker`, `player/inputs.py` |
+| Expandir carpetas/`.m3u` de la línea de comandos y de lo arrastrado | `player/inputs.py::expand_inputs` |
+| Acción al terminar la lista (cuenta regresiva, apagar/hibernar/reiniciar) | `player/power.py` |
+| Diálogo del ecualizador (pasos de 0,1 dB) | `player/equalizer_dialog.py` |
+| Una sola ventana (`QLocalServer`, `--new-window`, `--enqueue`) | `player/single_instance.py` |
+| Diagnóstico de VLC ausente / de 32 bits al arrancar | `player/vlc_check.py` |
 | Marcadores nombrados por archivo | `player/bookmarks.py`, `player/bookmarks_dialog.py` |
 | Lista de archivos/URLs abiertos recientemente | `player/recent_files.py` |
 | Orden de reproducción (secuencial/aleatorio) y detección de fallo | `player/playlist_order.py` |
@@ -82,6 +91,10 @@ tener VLC instalado.
 | Ícono de la app (ventana + `.exe`) | `player/assets/icon.png`, `player/assets/icon.ico` |
 | Número de versión (única fuente) | `player.__version__` |
 | Receta de PyInstaller para el ejecutable de Windows | `ReproductorMultimediaPro.spec` |
+| Runtime hook que elige el libVLC empaquetado (`BUNDLE_VLC=1`) | `packaging/rthook_bundled_vlc.py` |
+| Instalador por usuario (Inno Setup 6) | `installer/ReproductorMultimediaPro.iss` |
+| Licencias de VLC y enlace a su código fuente | `licenses/` |
+| Build automático tras el CI en verde | `.github/workflows/build-exe.yml` |
 | Recurso de versión del `.exe` (Propiedades → Detalles) | `packaging/version_resource.py` |
 | Release con etiqueta `v*` (CI, build, zip, instalador, GitHub Release) | `.github/workflows/release.yml` |
 
@@ -93,25 +106,45 @@ dist/installer/ReproductorMultimediaPro-<version>-setup.exe  (Inno Setup, por us
 ```
 
 Se genera con `pyinstaller --noconfirm ReproductorMultimediaPro.spec` (y
-`iscc installer\ReproductorMultimediaPro.iss` para el instalador), manualmente o
-automáticamente tras cada push a `main`/`master` con el CI en verde vía
-`.github/workflows/build-exe.yml` (queda como artifact descargable en la
-ejecución correspondiente de GitHub Actions). Ver
+`iscc /DAppVersion=<version> installer\ReproductorMultimediaPro.iss` para el
+instalador), manualmente o automáticamente tras cada push a
+`main`/`master` con el CI en verde vía `.github/workflows/build-exe.yml`
+(queda como artifact descargable en la ejecución correspondiente de GitHub
+Actions; la última, del 2026-10-03, pasó). Ver
 [docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md).
-Al subir una etiqueta `v<version>` (igual a `player.__version__`),
-`.github/workflows/release.yml` corre el CI completo y luego construye la
-carpeta onedir, el `.zip`, el instalador y `SHA256SUMS.txt`, y los publica
-como GitHub Release (todavía no se ejecutó en GitHub). El `.exe` lleva un
-recurso de versión generado de `player.__version__` (verificado en un
-build local, ver el workflow de empaquetado).
+Al subir una etiqueta `v<version>` (igual a `player.__version__`, hoy
+`0.1.0`), `.github/workflows/release.yml` corre el CI completo y luego
+construye la carpeta onedir, el `.zip`, el instalador y `SHA256SUMS.txt`, y
+los publica como GitHub Release. **Todavía no se ejecutó**: el Release
+`v0.1.0` que existe en GitHub (2026-09-19) es anterior a este workflow y
+trae el antiguo `.exe` de un solo archivo.
+
 No empaqueta VLC por defecto: la máquina que ejecute el `.exe` necesita VLC
-3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado; ver
-README). **El cambio a onedir, el recorte de módulos Qt, el instalador y la
-opción BUNDLE_VLC no se construyeron ni probaron todavía** (solo se validó
-la sintaxis del spec y del YAML): falta un build real y una prueba de
-arranque del instalado.
+3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado, con
+sus licencias; ver README). Verificado con builds locales (2026-10-01/02):
+onedir de 77,9 MB que arranca con el VLC del sistema, variante
+`BUNDLE_VLC=1` de 182,5 MB que usa solo el libVLC incluido, recurso de
+versión del `.exe`, y el instalador compilado con instalación y
+desinstalación silenciosas (sin restos en el registro). Falta una prueba
+manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
+
+- **Tanda P3 del informe (2026-10-03).** "Abrir carpeta" se recorre en un
+  `QThread` (`player/folder_scan.py`): lotes en el mismo orden natural que
+  `scan_folder()`, progreso en la barra de estado y Archivo → "Cancelar
+  escaneo de carpeta" (agrega lo encontrado hasta ahí); las señales de fin
+  y cancelación van a métodos de `MainWindow` para que Qt las encole al
+  hilo de la UI. La pista de audio y la de subtítulos se recuerdan por
+  archivo (`positions.json`, junto a la posición) y se restauran al
+  reproducirlo. Ecualizador en pasos de 0,1 dB, con un campo numérico por
+  banda y para el preamp. Atajos del bucle A-B: `Ctrl+Shift+A` / `B` / `L`.
+  Las listas `.m3u8` se guardan de forma atómica (temporal + fsync +
+  reemplazo, con `.bak` al que cae la carga). `licenses/` (GPL/LGPL de VLC
+  y el enlace al código fuente de VLC 3.0.23) viaja con el build
+  `BUNDLE_VLC=1` y con el instalador. Cubierto por
+  `tests/test_folder_scan.py`, `test_resume.py`, `test_equalizer.py`,
+  `test_inputs.py` y `test_persistence.py`.
 
 - **Cuatro funciones inspiradas en BS.Player**: recordar posición de
   reproducción entre sesiones, repetición A-B (loop de un tramo), sincronía
@@ -162,7 +195,9 @@ arranque del instalado.
   Reiniciar. Se dispara solo cuando la playlist termina de verdad (no en
   modo "Repetir: Todo"). Apagar/Reiniciar usan `shutdown /s|/r /t 60` (60s
   de margen, cancelable con `shutdown /a`); Hibernar (`shutdown /h`) es
-  inmediato al no admitir retraso. Como con cualquier acción que apaga o
+  inmediato al no admitir retraso (la tanda P2 lo reemplazó por una
+  cuenta regresiva propia de 60 s, cancelable, para las tres acciones:
+  `player/power.py`). Como con cualquier acción que apaga o
   reinicia la máquina, **nunca se ejecuta un `shutdown` real durante las
   pruebas**: `tests/test_on_finish_action.py` (5 tests) parchea
   `subprocess.run` para verificar el comando exacto que se arma en cada
@@ -351,19 +386,27 @@ arranque del instalado.
 
 ## Verification
 
-```bash
-python -m pytest -q
+```powershell
+python -m pip install -r requirements-dev.txt
+$env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-`tests/test_formats.py`, `test_resume.py`, `test_bookmarks.py` y
+**2026-10-03, Windows 11, Python 3.14, libVLC 3.0.23: 319 passed** (≈56 s).
+En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
+con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
+`windows-latest` (Python 3.12 y 3.14, VLC instalado con `choco`); la última
+ejecución (2026-10-03) pasó en los tres jobs. Corre `pytest` tú mismo antes
+de confiar en un número de tests: la suite sigue creciendo.
+
+`tests/test_formats.py`, `test_resume.py`, `test_bookmarks.py`,
+`test_inputs.py`, `test_playlist_order.py`, `test_settings.py` y
 `test_opensubtitles.py` no dependen de VLC ni de Qt (este último tampoco
-toca la red real: mockea `requests`). El resto de la suite (`test_backend.py`, `test_visualizer.py`,
-`test_app_smoke.py`, `test_on_finish_action.py`) importa `vlc` de verdad y
-se **omite automáticamente** (no falla) si no hay VLC instalado en la
-máquina — son pruebas de humo reales contra libVLC, no mocks. Corre
-`pytest` tú mismo antes de confiar en un número de tests
-pasados; no hay una cifra fija documentada aquí porque la suite sigue
-creciendo.
+toca la red real: mockea `requests`). Las pruebas que importan `vlc`
+(`test_backend.py`, `test_visualizer.py`, `test_app_smoke.py`,
+`test_on_finish_action.py`, ...) son pruebas reales contra libVLC, no
+mocks, y se **omiten automáticamente** (no fallan) si no hay VLC instalado.
+Detalle por archivo en
+[docs/workflows/testing-ci/workflow.md](workflows/testing-ci/workflow.md).
 
 ## Known Issues
 
@@ -374,17 +417,15 @@ creciendo.
   Resolution / RTX Video HDR realmente se activan (requieren la GPU y el
   panel de NVIDIA; la plataforma `offscreen` de las pruebas no renderiza
   libVLC).
-- **El ecualizador redondea a dB enteros** en los sliders: desactivarlo y
-  volver a activarlo reenvía esos enteros (un preset de pasos de 0,8 dB
-  cambia levemente). Los valores guardados entre sesiones sí son exactos.
-- **Build sin probar**: onedir + instalador Inno Setup + `BUNDLE_VLC` (ver
-  Release).
-- **`main_window.py` sigue siendo grande** (~2.200 líneas, el informe
+- **El workflow de release nunca se ejecutó** (no se subió ninguna
+  etiqueta desde que existe) y el instalado no se probó a mano ("Abrir
+  con", reproducir); ver Release.
+- **`main_window.py` sigue siendo grande** (~2.400 líneas, el informe
   apuntaba a ~400): ya están separados todos los módulos que listaba el
   informe (acciones, lista modelo/vista + controlador, vista previa,
-  pantalla completa, widgets, ecualizador, energía, tema...), pero
-  `MainWindow` todavía arma los menús y cablea transporte, pistas,
-  subtítulos, A-B, marcadores y ajustes.
+  pantalla completa, widgets, ecualizador, energía, tema, escaneo de
+  carpetas...), pero `MainWindow` todavía arma los menús y cablea
+  transporte, pistas, subtítulos, A-B, marcadores y ajustes.
 - **Arrastrar para reordenar la lista no tiene prueba automática del
   gesto en sí** (Qt `offscreen` sin mouse simulado): se prueba el mismo
   camino que usa `dropEvent`; verificar a mano arrastrar una y varias
@@ -393,8 +434,13 @@ creciendo.
   expone qué bytes ya bajó; se dibuja el llenado de su caché de red
   (`:network-caching`, 1 s por defecto) delante de la posición, así que
   nunca muestra más que ese tamaño. Falta verla con un stream real.
-- **Recorrer una carpeta grande** sigue siendo en el hilo de la UI (con
-  orden natural); las duraciones sí se leen en segundo plano.
+- **Solo "Abrir carpeta" se recorre en segundo plano**: una carpeta
+  arrastrada sobre la ventana, pasada por línea de comandos o reenviada
+  por otra instancia se expande en el hilo de la UI (con orden natural).
+- **El ecualizador no pasa a "Personalizado"** al mover una banda a mano
+  después de elegir un preset (el combo sigue mostrando el preset).
+- **No se recuerda por archivo** el desfase de audio ni el de subtítulos
+  (sí las pistas elegidas y la posición).
 
 ## Recently Fixed
 
@@ -432,7 +478,7 @@ creciendo.
   traducción `qtbase_es`, RTX VSR/HDR, vista previa liviana con caché,
   cuenta regresiva para apagar/hibernar/reiniciar, reanudar vía
   `:start-time`, controlador de pantalla completa propio. Detalle y estado
-  por punto en el informe (`improvement_reports/media_player_pro.md`).
+  por punto en el informe (`..\improvement_reports\media_player_pro.md`, fuera del repositorio).
 
 - **Tanda P1 del informe de mejoras (2026-09-30).**
   (1) **Presets del ecualizador**: `vlc.AudioEqualizer(indice)` toma el

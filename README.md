@@ -64,7 +64,13 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   nombre/ruta, Quitar entradas no disponibles. Quitar el elemento que suena
   y pulsar Siguiente sigue con el que ocupó su lugar. Guardar/cargar como
   `.m3u8`/`.m3u` (rutas relativas a la carpeta de la lista, UTF-8 o
-  ANSI/cp1252, `file:///`). Selección múltiple para quitar varios.
+  ANSI/cp1252, `file:///`; se guarda de forma atómica, con una copia
+  `.bak` de la anterior). Selección múltiple para quitar varios.
+- **Abrir carpeta** la recorre en segundo plano: la ventana sigue
+  respondiendo, la barra de estado muestra "Escaneando carpeta… N archivos
+  encontrados" y Archivo → "Cancelar escaneo de carpeta" la detiene
+  (lo encontrado hasta ese momento se agrega igual). Las carpetas
+  arrastradas o pasadas por línea de comandos se recorren al momento.
 - **Una sola ventana**: abrir un archivo con el programa ya abierto lo manda
   a esa ventana (Archivo → "Permitir varias ventanas" o `--new-window` para
   desactivarlo; `--enqueue` solo lo agrega a la lista).
@@ -76,9 +82,12 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   reproducir se salta (también con Repetir uno); tras una vuelta completa
   sin nada reproducible, se detiene.
 - Selección de pista de audio y de subtítulos, carga de subtítulos externos
-  (`.srt`, `.ass`, `.ssa`, `.sub`, `.vtt`).
-- Ecualizador gráfico de 10 bandas con los presets de VLC (en español:
-  Plano, Clásica, Rock, Pop, ...).
+  (`.srt`, `.ass`, `.ssa`, `.sub`, `.vtt`). La pista de audio y la de
+  subtítulos elegidas se **recuerdan por archivo** y se vuelven a elegir
+  al reabrirlo.
+- Ecualizador gráfico de 10 bandas más preamplificador (−20 a +20 dB, en
+  **pasos de 0,1 dB**: cada banda tiene su slider y un campo numérico) con
+  los presets de VLC (en español: Plano, Clásica, Rock, Pop, ...).
 - **Capítulos** de MKV/MP4: menú Reproducción → Capítulos, `RePág`/`AvPág`,
   rayas azules en la barra y el nombre del capítulo en la vista previa.
 - **Sincronía de audio** (A/V): `J`/`K` ±50 ms, con OSD.
@@ -120,7 +129,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   Reproducir tras Detener o tras terminar la lista vuelve a arrancar la
   pista actual.
 - **Repetición A-B**: marca un punto A y un punto B para poner en bucle
-  solo ese tramo.
+  solo ese tramo — con el botón A-B (cicla A → B → desactivar), el menú
+  Reproducción o los atajos `Ctrl+Shift+A` (punto A), `Ctrl+Shift+B`
+  (punto B) y `Ctrl+Shift+L` (limpiar).
 - **Sincronía de subtítulos** ajustable en vivo (±50 ms, tecla `G`/`H`) y
   **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande).
 - **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo
@@ -173,6 +184,7 @@ La lista completa está en Ayuda → Atajos de teclado (`F1`).
 | J / K            | Adelantar / retrasar audio 50 ms |
 | G / H            | Adelantar / retrasar subtítulos 50 ms |
 | B                | Agregar marcador aquí      |
+| Ctrl+Shift+A / B / L | Marcar punto A / punto B / limpiar bucle A-B |
 | .                | Avanzar un fotograma (en pausa) |
 | Ctrl+Shift+S     | Captura rápida             |
 | F1               | Atajos de teclado          |
@@ -210,8 +222,9 @@ Opcionalmente, `BUNDLE_VLC=1` (y `VLC_DIR` si VLC no está en la ruta
 estándar) copia libVLC y un `plugins/` recortado dentro del paquete; la app
 lo usa si está y si no cae al VLC del sistema. Las licencias (GPL/LGPL de
 VLC) y el enlace al código fuente de la versión incluida están en
-[licenses/](licenses/THIRD_PARTY_NOTICES.txt); el build con `BUNDLE_VLC=1` y
-el instalador las copian a `licenses\` junto al `.exe`. Si cambias la versión
+[licenses/](licenses/THIRD_PARTY_NOTICES.txt); el build con `BUNDLE_VLC=1` las
+copia a `_internal\licenses\` y el instalador siempre las instala en
+`licenses\` junto al `.exe`. Si cambias la versión
 de VLC que empaquetas, actualiza el enlace del tarball en ese archivo.
 
 La versión vive solo en `player/__init__.py` (`__version__`):

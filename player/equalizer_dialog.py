@@ -180,8 +180,8 @@ class EqualizerDialog(QDialog):
 
     def state(self) -> EqualizerSettings:
         """Estado a guardar entre sesiones. Con el ecualizador activo, los
-        valores exactos de libVLC (un preset usa pasos de 0.8 dB que los
-        sliders enteros redondean); desactivado, lo que muestran los sliders."""
+        valores exactos de libVLC (sin pasar por la resolucion de 0.1 dB de
+        los controles); desactivado, lo que muestran los controles."""
         active = self.player.get_equalizer_values()
         if active is not None:
             preamp, bands = active

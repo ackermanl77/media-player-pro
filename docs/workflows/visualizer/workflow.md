@@ -8,10 +8,12 @@ un archivo de solo audio.
 ## Uso
 
 Menú **Audio → "Visualizador de audio (espectro)"** (activado por defecto,
-checkbox). Se activa automáticamente para cualquier archivo local cuya
-extensión esté en `player.formats.AUDIO_EXTS` — no para streams por URL
-(ver "Known Issues" en `docs/PROJECT_STATUS.md`) ni, por supuesto, para
-archivos de video reales, que siempre muestran su propio video.
+checkbox; el estado se recuerda entre sesiones). Se activa
+automáticamente para cualquier archivo local cuya extensión esté en
+`player.formats.AUDIO_EXTS`, y para una URL una vez abierta, si resulta
+ser de solo audio (una radio por internet: se recarga con el
+visualizador). Nunca para archivos de video, que muestran su propio
+video.
 
 El cambio de estado del toggle se aplica a partir de la **siguiente** pista
 que se cargue, no a la que esté sonando en ese momento.

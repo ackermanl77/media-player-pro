@@ -5,13 +5,19 @@ Inspirado en BS.Player: repetir en bucle solo un tramo del archivo actual
 
 ## Uso
 
-Botón **"A-B"** en la barra de controles, cicla en tres clics:
+Botón **"Bucle A-B"** en la barra de controles (o Reproducción → "Bucle
+A-B"), cicla en tres clics:
 
 1. Primer clic: marca el punto A en el tiempo actual de reproducción — el
-   botón muestra `A: MM:SS`.
-2. Segundo clic: marca el punto B (debe ser posterior a A) — el botón
-   muestra `A-B: MM:SS-MM:SS` y el tramo empieza a repetirse en bucle.
+   OSD muestra `Punto A: MM:SS` y el tooltip del botón lo recuerda.
+2. Segundo clic: marca el punto B (debe ser posterior a A) — el OSD
+   muestra `A-B: MM:SS-MM:SS`, el botón queda marcado y el tramo empieza a
+   repetirse en bucle.
 3. Tercer clic: limpia A y B, vuelve a reproducción normal.
+
+También con atajos (y entradas propias en el menú Reproducción):
+`Ctrl+Shift+A` marca (o vuelve a marcar) el punto A, `Ctrl+Shift+B` el
+punto B y `Ctrl+Shift+L` limpia el bucle.
 
 Si se intenta marcar B en un punto anterior o igual a A, se ignora y
 aparece un aviso en la barra de estado.
@@ -26,16 +32,17 @@ recordar de memoria dónde quedaron.
 
 ## Cómo funciona por dentro
 
-`MainWindow.loop_point_a`/`loop_point_b` (en ms, o `None`). `update_ui()`
-(el mismo timer de 250 ms que ya actualiza la barra de progreso) comprueba
-en cada tick si la posición actual pasó de `loop_point_b`; si es así,
-llama a `player.set_time_ms(loop_point_a)`. No requiere nada especial del
-backend de VLC — solo `set_time_ms`, que ya existía.
+`MainWindow.loop_point_a`/`loop_point_b` (en ms, o `None`). Mientras hay
+un bucle activo corre un temporizador propio de precisión de 50 ms
+(`_ab_timer`, `AB_LOOP_TICK_MS`; antes era el tick de 250 ms de
+`update_ui()`), que comprueba si la posición pasó de `loop_point_b` y, si
+es así, llama a `player.set_time_ms(loop_point_a)`. Fuera del bucle el
+temporizador está detenido.
 
-`PositionSlider` (subclase de `QSlider` en `player/main_window.py`) pinta
-los puntos A/B como líneas naranjas en `paintEvent()`, a partir de las
-fracciones `loop_point_a/length` y `loop_point_b/length` que
-`_refresh_position_markers()` recalcula en cada tick de `update_ui()`
+`PositionSlider` (subclase de `QSlider` en `player/widgets.py`) pinta los
+puntos A/B como líneas naranjas en `paintEvent()`, a partir de las
+fracciones `loop_point_a/length` y `loop_point_b/length`; los marcadores
+se recalculan cuando cambian (pista, bucle, marcadores, capítulos)
 (junto con los marcadores nombrados — ver
 [docs/workflows/bookmarks/workflow.md](../bookmarks/workflow.md)).
 
