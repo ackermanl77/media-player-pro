@@ -1,7 +1,16 @@
 """Dialogo del ecualizador (antes dentro de main_window.py)."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QSlider, QVBoxLayout
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QLabel,
+    QSlider,
+    QVBoxLayout,
+)
 
 from .backend import VLCPlayer
 from .settings import EqualizerSettings
@@ -31,6 +40,8 @@ def format_band_frequency(freq: float) -> str:
 
 
 class EqualizerDialog(QDialog):
+    SCALE = 10
+
     def __init__(self, player: VLCPlayer, parent=None, initial=None):
         """initial: EqualizerSettings guardados (ver player/settings.py), para
         que el dialogo -- que se crea recien la primera vez que se abre --
@@ -56,32 +67,38 @@ class EqualizerDialog(QDialog):
         freqs = player.equalizer_band_frequencies()
 
         preamp_box = QVBoxLayout()
-        self.preamp_value_label = QLabel("0 dB")
+        self.preamp_value_label = QLabel("0,0 dB")
         preamp_box.addWidget(self.preamp_value_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.preamp_slider = QSlider(Qt.Orientation.Vertical)
-        self.preamp_slider.setRange(-20, 20)
+        self.preamp_slider.setRange(-200, 200)
         self.preamp_slider.setValue(0)
         self.preamp_slider.setMinimumHeight(140)
         preamp_box.addWidget(self.preamp_slider, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.preamp_spin = self._db_spinbox()
+        preamp_box.addWidget(self.preamp_spin, alignment=Qt.AlignmentFlag.AlignHCenter)
         preamp_box.addWidget(QLabel("Preamp"), alignment=Qt.AlignmentFlag.AlignHCenter)
         bands_layout.addLayout(preamp_box)
 
         self.band_sliders = []
         self.band_value_labels = []
+        self.band_spins = []
         for i, freq in enumerate(freqs):
             box = QVBoxLayout()
-            value_label = QLabel("0 dB")
+            value_label = QLabel("0,0 dB")
             box.addWidget(value_label, alignment=Qt.AlignmentFlag.AlignHCenter)
             slider = QSlider(Qt.Orientation.Vertical)
-            slider.setRange(-20, 20)
+            slider.setRange(-200, 200)
             slider.setValue(0)
             slider.setMinimumHeight(140)
             box.addWidget(slider, alignment=Qt.AlignmentFlag.AlignHCenter)
+            spin = self._db_spinbox()
+            box.addWidget(spin, alignment=Qt.AlignmentFlag.AlignHCenter)
             label_text = format_band_frequency(freq)
             box.addWidget(QLabel(label_text), alignment=Qt.AlignmentFlag.AlignHCenter)
             bands_layout.addLayout(box)
             self.band_sliders.append(slider)
             self.band_value_labels.append(value_label)
+            self.band_spins.append(spin)
         layout.addLayout(bands_layout)
 
         self.set_controls_enabled(False)
@@ -90,21 +107,35 @@ class EqualizerDialog(QDialog):
         self.enable_checkbox.toggled.connect(self.on_enable_toggled)
         self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
         self.preamp_slider.valueChanged.connect(self.on_preamp_changed)
+        self.preamp_spin.valueChanged.connect(self.on_preamp_spin_changed)
         for i, slider in enumerate(self.band_sliders):
             slider.valueChanged.connect(lambda val, idx=i: self.on_band_changed(idx, val))
+        for i, spin in enumerate(self.band_spins):
+            spin.valueChanged.connect(lambda val, idx=i: self.on_band_spin_changed(idx, val))
+
+    def _db_spinbox(self) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(-20.0, 20.0)
+        spin.setDecimals(1)
+        spin.setSingleStep(0.1)
+        spin.setSuffix(" dB")
+        return spin
 
     def set_controls_enabled(self, enabled: bool):
         self.preset_combo.setEnabled(enabled)
         self.preamp_slider.setEnabled(enabled)
+        self.preamp_spin.setEnabled(enabled)
         for s in self.band_sliders:
+            s.setEnabled(enabled)
+        for s in self.band_spins:
             s.setEnabled(enabled)
 
     def on_enable_toggled(self, enabled: bool):
         self.set_controls_enabled(enabled)
         if enabled:
-            self.player.set_equalizer_preamp(float(self.preamp_slider.value()))
+            self.player.set_equalizer_preamp(self._slider_to_db(self.preamp_slider.value()))
             for i, slider in enumerate(self.band_sliders):
-                self.player.set_equalizer_band(i, float(slider.value()))
+                self.player.set_equalizer_band(i, self._slider_to_db(slider.value()))
         else:
             self.player.disable_equalizer()
 
@@ -129,17 +160,23 @@ class EqualizerDialog(QDialog):
             self.set_controls_enabled(True)
 
     def _set_slider_values(self, preamp: float, bands):
-        preamp_val = int(round(preamp))
+        preamp_val = self._db_to_slider(preamp)
         self.preamp_slider.blockSignals(True)
         self.preamp_slider.setValue(preamp_val)
         self.preamp_slider.blockSignals(False)
-        self.preamp_value_label.setText(f"{preamp_val:+d} dB")
+        self.preamp_spin.blockSignals(True)
+        self.preamp_spin.setValue(self._slider_to_db(preamp_val))
+        self.preamp_spin.blockSignals(False)
+        self.preamp_value_label.setText(self._format_db(self._slider_to_db(preamp_val)))
         for i, slider in enumerate(self.band_sliders):
-            band_val = int(round(bands[i])) if i < len(bands) else 0
+            band_val = self._db_to_slider(bands[i]) if i < len(bands) else 0
             slider.blockSignals(True)
             slider.setValue(band_val)
             slider.blockSignals(False)
-            self.band_value_labels[i].setText(f"{band_val:+d} dB")
+            self.band_spins[i].blockSignals(True)
+            self.band_spins[i].setValue(self._slider_to_db(band_val))
+            self.band_spins[i].blockSignals(False)
+            self.band_value_labels[i].setText(self._format_db(self._slider_to_db(band_val)))
 
     def state(self) -> EqualizerSettings:
         """Estado a guardar entre sesiones. Con el ecualizador activo, los
@@ -149,8 +186,8 @@ class EqualizerDialog(QDialog):
         if active is not None:
             preamp, bands = active
         else:
-            preamp = float(self.preamp_slider.value())
-            bands = [float(s.value()) for s in self.band_sliders]
+            preamp = self._slider_to_db(self.preamp_slider.value())
+            bands = [self._slider_to_db(s.value()) for s in self.band_sliders]
         return EqualizerSettings(
             enabled=active is not None,
             preset=self.preset_combo.currentData(),
@@ -169,11 +206,37 @@ class EqualizerDialog(QDialog):
             self._set_slider_values(*values)
 
     def on_preamp_changed(self, val: int):
-        self.preamp_value_label.setText(f"{val:+d} dB")
+        db = self._slider_to_db(val)
+        self.preamp_value_label.setText(self._format_db(db))
+        self.preamp_spin.blockSignals(True)
+        self.preamp_spin.setValue(db)
+        self.preamp_spin.blockSignals(False)
         if self.enable_checkbox.isChecked():
-            self.player.set_equalizer_preamp(float(val))
+            self.player.set_equalizer_preamp(db)
 
     def on_band_changed(self, idx: int, val: int):
-        self.band_value_labels[idx].setText(f"{val:+d} dB")
+        db = self._slider_to_db(val)
+        self.band_value_labels[idx].setText(self._format_db(db))
+        self.band_spins[idx].blockSignals(True)
+        self.band_spins[idx].setValue(db)
+        self.band_spins[idx].blockSignals(False)
         if self.enable_checkbox.isChecked():
-            self.player.set_equalizer_band(idx, float(val))
+            self.player.set_equalizer_band(idx, db)
+
+    def on_preamp_spin_changed(self, value: float):
+        self.preamp_slider.setValue(self._db_to_slider(value))
+
+    def on_band_spin_changed(self, idx: int, value: float):
+        self.band_sliders[idx].setValue(self._db_to_slider(value))
+
+    @classmethod
+    def _db_to_slider(cls, value: float) -> int:
+        return int(round(float(value) * cls.SCALE))
+
+    @classmethod
+    def _slider_to_db(cls, value: int) -> float:
+        return float(value) / cls.SCALE
+
+    @staticmethod
+    def _format_db(value: float) -> str:
+        return f"{value:+.1f} dB".replace(".", ",")

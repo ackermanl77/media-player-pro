@@ -45,6 +45,55 @@ def scan_folder(folder: str, should_stop=None) -> list:
     return found
 
 
+def scan_folder_batches(folder: str, batch_size: int = 200, should_stop=None):
+    """Igual que scan_folder(), pero produce lotes ordenados de hasta
+    `batch_size` entradas para una UI que quiera mostrar progreso sin
+    bloquear el hilo principal."""
+    if batch_size <= 0:
+        raise ValueError("batch_size debe ser > 0")
+
+    def stopped() -> bool:
+        return should_stop is not None and bool(should_stop())
+
+    def walk(directory):
+        # Recorrido en profundidad con archivos y subcarpetas de cada nivel
+        # ordenados juntos: asi el orden total es el mismo que el sort() de
+        # scan_folder() sobre la ruta completa. Una subcarpeta se ordena como
+        # "nombre\" (el prefijo de sus archivos), no como "nombre".
+        try:
+            with os.scandir(directory) as it:
+                entries = list(it)
+        except OSError:
+            return  # como os.walk: una carpeta ilegible se salta
+        items = []
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                continue
+            if is_dir:
+                items.append((natural_sort_key(entry.path + os.sep), True, entry.path))
+            elif is_media_file(entry.name):
+                items.append((natural_sort_key(entry.path), False, entry.path))
+        items.sort(key=lambda item: item[0])
+        for _key, is_dir, path in items:
+            if is_dir:
+                yield from walk(path)
+            else:
+                yield path
+
+    batch = []
+    for path in walk(folder):
+        if stopped():
+            break
+        batch.append(path)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:  # tambien al cancelar: lo encontrado hasta ahi no se pierde
+        yield batch
+
+
 def read_playlist_file(path: str) -> list:
     try:
         with open(path, "rb") as f:

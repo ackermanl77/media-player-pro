@@ -1,7 +1,7 @@
 """Expansion de entradas (carpetas, .m3u, URLs) y orden natural."""
 import os
 
-from player.inputs import expand_inputs, filter_dropped, natural_sort_key, scan_folder
+from player.inputs import expand_inputs, filter_dropped, natural_sort_key, scan_folder, scan_folder_batches
 
 
 def _touch(path):
@@ -24,6 +24,42 @@ def test_scan_folder_recurses_and_keeps_only_media(tmp_path):
     assert [os.path.relpath(p, tmp_path) for p in found] == [
         os.path.join("sub", "video.MKV"), "Track 2.flac", "Track 10.flac",
     ]
+
+
+def test_scan_folder_batches_yield_sorted_chunks(tmp_path):
+    paths = [
+        _touch(tmp_path / "Track 10.flac"),
+        _touch(tmp_path / "Track 2.flac"),
+        _touch(tmp_path / "sub" / "video.MKV"),
+    ]
+    batches = list(scan_folder_batches(str(tmp_path), batch_size=2))
+    assert batches == [
+        [paths[2], paths[1]],
+        [paths[0]],
+    ]
+
+
+def test_scan_folder_batches_match_scan_folder_order(tmp_path):
+    # Casos donde ordenar carpeta por carpeta difiere de ordenar la ruta
+    # completa: "a" vs "a b.mp3", "Disc 1" vs "Disc 10.mp3", mayusculas.
+    for name in ("a b.mp3", "a/x.mp3", "Disc 10.mp3", "Disc 1/02.ogg", "Disc 1/1.ogg",
+                 "Z/inner/deep.mp4", "b.MP3", "B/c.flac", "notes.txt"):
+        _touch(tmp_path / name)
+    flat = [path for batch in scan_folder_batches(str(tmp_path), batch_size=3) for path in batch]
+    assert flat == scan_folder(str(tmp_path))
+    assert len(flat) == 8
+
+
+def test_scan_folder_batches_honor_cancellation(tmp_path):
+    a = _touch(tmp_path / "a.mp3")
+    _touch(tmp_path / "b.mp3")
+    calls = {"count": 0}
+
+    def should_stop():
+        calls["count"] += 1
+        return calls["count"] > 1
+
+    assert list(scan_folder_batches(str(tmp_path), batch_size=1, should_stop=should_stop)) == [[a]]
 
 
 def test_expand_inputs_handles_folders_playlists_urls_and_files(tmp_path):

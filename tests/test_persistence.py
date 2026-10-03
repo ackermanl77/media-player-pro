@@ -8,7 +8,7 @@ import pytest
 
 from player import bookmarks, config, jsonstore, recent_files, resume
 from player.formats import normalize_path, path_key
-from player.m3u import decode_playlist_bytes, format_m3u, parse_m3u
+from player.m3u import decode_playlist_bytes, format_m3u, load_playlist, parse_m3u, playlist_backup_path, save_playlist
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def test_save_is_atomic_and_keeps_a_backup(home):
     path = resume.positions_file()
     backup = jsonstore.backup_path(path)
     assert backup.exists()
-    assert json.loads(backup.read_text(encoding="utf-8")) == {path_key("a.mp4"): 60_000}
+    assert json.loads(backup.read_text(encoding="utf-8")) == {path_key("a.mp4"): {"position_ms": 60_000}}
     # Sin temporales huerfanos en la carpeta.
     assert sorted(p.name for p in path.parent.iterdir()) == ["positions.json", "positions.json.bak"]
 
@@ -157,3 +157,24 @@ def test_m3u_round_trip(tmp_path):
     entries = [str(tmp_path / "ñ.mp3"), "http://example.com/s"]
     data = format_m3u(entries).encode("utf-8")
     assert parse_m3u(data, str(tmp_path / "x.m3u")) == entries
+
+
+def test_playlist_save_is_atomic_and_keeps_a_backup(tmp_path):
+    path = tmp_path / "mix.m3u8"
+    first = [str(tmp_path / "a.mp3")]
+    second = [str(tmp_path / "b.mp3")]
+    assert save_playlist(path, first)
+    assert save_playlist(path, second)
+    assert path.read_text(encoding="utf-8") == format_m3u(second)
+    assert playlist_backup_path(path).read_text(encoding="utf-8") == format_m3u(first)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["mix.m3u8", "mix.m3u8.bak"]
+
+
+def test_playlist_load_falls_back_to_backup_when_main_is_missing_or_corrupt(tmp_path):
+    path = tmp_path / "mix.m3u"
+    first = [str(tmp_path / "a.mp3")]
+    second = [str(tmp_path / "b.mp3")]
+    assert save_playlist(path, first)
+    assert save_playlist(path, second)
+    path.unlink()
+    assert load_playlist(path) == first

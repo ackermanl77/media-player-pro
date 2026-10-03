@@ -124,8 +124,8 @@ def test_choosing_a_preset_in_the_dialog_updates_sliders(qapp, player):
         for data in (0, 13):  # "Plano" (antes AttributeError sobre None) y "Rock"
             dialog.preset_combo.setCurrentIndex(dialog.preset_combo.findData(data))
             exp_preamp, exp_bands = _expected(data)
-            assert dialog.preamp_slider.value() == round(exp_preamp)
-            assert [s.value() for s in dialog.band_sliders] == [round(b) for b in exp_bands]
+            assert dialog.preamp_slider.value() == round(exp_preamp * 10)
+            assert [s.value() for s in dialog.band_sliders] == [round(b * 10) for b in exp_bands]
         state = dialog.state()
         assert state.enabled and state.preset == 13
         assert state.bands == pytest.approx(_expected(13)[1])  # exactos, no los enteros del slider
@@ -139,7 +139,8 @@ def test_dialog_built_later_shows_the_restored_equalizer(qapp, player):
     try:
         assert dialog.enable_checkbox.isChecked()
         assert dialog.preset_combo.currentData() == 5
-        assert dialog.preamp_slider.value() == 6
+        assert dialog.preamp_slider.value() == 60
+        assert dialog.preamp_spin.value() == pytest.approx(6.0)
         # Sincronizar el combo no debe reaplicar el preset encima de los
         # valores restaurados.
         assert player.get_equalizer_values()[1] == pytest.approx([1.0] * 10)
@@ -166,3 +167,25 @@ def test_band_labels_and_preset_names_are_spanish():
     assert len(PRESET_NAMES_ES) == 18
     assert preset_display_name("Full bass and treble") == "Graves y agudos"
     assert preset_display_name("Desconocido") == "Desconocido"
+
+
+def test_dialog_uses_tenth_db_steps_and_spinboxes(qapp, player):
+    dialog = EqualizerDialog(player)
+    try:
+        dialog.enable_checkbox.setChecked(True)
+        dialog.preamp_slider.setValue(15)
+        dialog.band_sliders[0].setValue(-25)
+        assert dialog.preamp_spin.value() == pytest.approx(1.5)
+        assert dialog.band_spins[0].value() == pytest.approx(-2.5)
+        assert dialog.preamp_value_label.text() == "+1,5 dB"
+        assert dialog.band_value_labels[0].text() == "-2,5 dB"
+
+        dialog.preamp_spin.setValue(-3.2)
+        dialog.band_spins[1].setValue(4.4)
+        assert dialog.preamp_slider.value() == -32
+        assert dialog.band_sliders[1].value() == 44
+        preamp, bands = player.get_equalizer_values()
+        assert preamp == pytest.approx(-3.2)
+        assert bands[1] == pytest.approx(4.4)
+    finally:
+        dialog.close()

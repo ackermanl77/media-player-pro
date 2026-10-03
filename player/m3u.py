@@ -1,6 +1,10 @@
 """Lectura/escritura de listas .m3u/.m3u8. Modulo puro, sin VLC ni Qt."""
 
 import os
+import shutil
+import tempfile
+import time
+from pathlib import Path
 
 from .formats import has_uri_scheme, normalize_path
 
@@ -41,3 +45,58 @@ def parse_m3u(data: bytes, playlist_path: str) -> list:
 
 def format_m3u(entries) -> str:
     return "#EXTM3U\n" + "".join(f"{e}\n" for e in entries)
+
+
+def playlist_backup_path(path: str | os.PathLike[str]) -> Path:
+    path = Path(path)
+    return path.with_name(path.name + ".bak")
+
+
+def load_playlist(path: str | os.PathLike[str]) -> list:
+    for candidate in (Path(path), playlist_backup_path(path)):
+        try:
+            data = candidate.read_bytes()
+        except OSError:
+            continue
+        try:
+            return parse_m3u(data, str(candidate))
+        except ValueError:
+            continue
+    return []
+
+
+def save_playlist(path: str | os.PathLike[str], entries) -> bool:
+    text = format_m3u(entries)
+    path = Path(path)
+    tmp_name = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists():
+            shutil.copyfile(path, playlist_backup_path(path))
+        _replace_with_retry(tmp_name, path)
+        tmp_name = None
+        return True
+    except OSError:
+        return False
+    finally:
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+
+
+def _replace_with_retry(src: str, dst: Path, attempts: int = 5) -> None:
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)

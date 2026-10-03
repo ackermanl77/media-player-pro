@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QStandardPaths, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -43,6 +43,7 @@ from .backend import FINISHED_STATES, MediaInfoProbe, PlaybackState, VLCPlayer, 
 from .bookmarks import add_bookmark, get_bookmarks
 from .bookmarks_dialog import BookmarksDialog
 from .equalizer_dialog import EqualizerDialog  # noqa: F401 -- reexportado (pruebas)
+from .folder_scan import FolderScanWorker
 from .formats import (
     build_open_filter,
     format_rate,
@@ -53,16 +54,17 @@ from .formats import (
     snapshot_file_name,
 )
 from .fullscreen import FullscreenMode
-from .inputs import expand_inputs, filter_dropped, read_playlist_file, scan_folder
+from .inputs import expand_inputs, filter_dropped, read_playlist_file
 from .logs import current_log_dir
-from .m3u import format_m3u
+from .m3u import load_playlist as load_m3u_playlist
+from .m3u import save_playlist as save_m3u_playlist
 from .playlist_controller import PlaylistController
 from .playlist_model import PlaylistView, display_name
 from .playlist_order import playback_failed
 from .power import POWER_ACTIONS, PowerCountdownDialog, run_power_action
 from .preview_controller import PreviewController
 from .recent_files import add_recent_file, clear_recent_files, get_recent_files
-from .resume import clear_position, get_saved_position_ms, save_position
+from .resume import clear_position, get_saved_position_ms, get_saved_track_selection, save_position, save_track_selection
 from .settings import (
     MAX_RATE,
     MAX_VOLUME,
@@ -178,17 +180,24 @@ class MainWindow(QMainWindow):
         self.bookmarks_dialog = None
         self.loop_point_a = None
         self.loop_point_b = None
+        self._position_markers_dirty = True
+        self._position_markers_length_ms = 0
         self.on_finish_action = "none"
         self._power_dialog = None
         # Subtitulos descargados para un archivo que ya no era el actual:
         # se cargan la proxima vez que se abra (ver _on_online_subtitle_ready).
         self._pending_subtitles = {}
+        self._pending_track_restore = None
         self._stream_visualizer_gen = -1
         self._stall_time_ms = 0
         self._stall_box = None
         # Llenado (0-100 %) de la cache de red de libVLC, del ultimo evento
         # Buffering del stream actual (ver _buffered_fractions).
         self._buffer_fill = 0.0
+        self._folder_scan_thread = None
+        self._folder_scan_worker = None
+        self._folder_scan_folder = ""
+        self._folder_scan_entries = []
 
         # Vista previa en miniatura al pasar el mouse por la barra de
         # progreso (ver preview_controller.py).
@@ -437,10 +446,15 @@ class MainWindow(QMainWindow):
         self.act_ab_loop = A("ab_loop", "Bucle A-B", self._on_ab_loop_clicked,
                              tooltip="Marca un punto A, luego un punto B: repite en bucle solo ese tramo. "
                                      "Un tercer clic lo desactiva.")
+        self.act_ab_set_a = A("ab_set_a", "Marcar punto A", self._set_ab_point_a, "Ctrl+Shift+A")
+        self.act_ab_set_b = A("ab_set_b", "Marcar punto B", self._set_ab_point_b, "Ctrl+Shift+B")
+        self.act_ab_clear = A("ab_clear", "Limpiar bucle A-B", self._clear_ab_loop_with_feedback, "Ctrl+Shift+L")
 
         # Archivo.
         A("open_files", "Abrir archivos...", self.open_files, QKeySequence.StandardKey.Open)
         A("open_folder", "Abrir carpeta...", self.open_folder)
+        self.act_cancel_folder_scan = A("cancel_folder_scan", "Cancelar escaneo de carpeta", self.cancel_folder_scan)
+        self.act_cancel_folder_scan.setEnabled(False)
         A("open_url", "Abrir URL...", self.open_url, "Ctrl+U")
         A("save_playlist", "Guardar lista (.m3u8)...", self.save_playlist)
         A("load_playlist", "Cargar lista...", self.load_playlist)
@@ -752,7 +766,8 @@ class MainWindow(QMainWindow):
         self.menu_recent_files.aboutToShow.connect(self._populate_recent_files_menu)
         R.populate(menu_file, [
             "open_files", "open_folder", "open_url", self.menu_recent_files, None,
-            "save_playlist", "load_playlist", "restore_session", "allow_multiple_windows", None, "quit",
+            "save_playlist", "load_playlist", "cancel_folder_scan", "restore_session",
+            "allow_multiple_windows", None, "quit",
         ])
 
         # -- Reproducción --
@@ -783,7 +798,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked, m=mode: self._set_repeat_mode(m))
             self.repeat_group.addAction(action)
             self.menu_repeat.addAction(action)
-        menu_playback.addAction(self.act_ab_loop)
+        R.populate(menu_playback, ["ab_loop", "ab_set_a", "ab_set_b", "ab_clear"])
 
         self.menu_chapters = menu_playback.addMenu("Capítulos")
         self.menu_chapters.aboutToShow.connect(self._populate_chapters_menu)
@@ -1026,6 +1041,7 @@ class MainWindow(QMainWindow):
         if path is not None:
             self.statusBar().showMessage(f"Reproduciendo: {self._display_name(path)}")
         self._chapters_cache = None
+        self._restore_saved_tracks()
         self._maybe_schedule_stream_visualizer(gen)
 
     def _on_buffering(self, gen: int, percent: float):
@@ -1047,6 +1063,7 @@ class MainWindow(QMainWindow):
     def _on_length_changed(self, gen: int, _length_ms: int):
         if self._is_current_gen(gen):
             self._chapters_cache = None
+            self._invalidate_position_markers()
 
     def _on_chapter_changed(self, gen: int, chapter: int):
         if not self._is_current_gen(gen):
@@ -1058,6 +1075,8 @@ class MainWindow(QMainWindow):
     def _on_tracks_changed(self, gen: int):
         if self._is_current_gen(gen):
             self._chapters_cache = None
+            self._invalidate_position_markers()
+            self._restore_saved_tracks()
             self._maybe_schedule_stream_visualizer(gen)
 
     def _on_meta_changed(self, gen: int):
@@ -1225,15 +1244,79 @@ class MainWindow(QMainWindow):
         self._add_and_maybe_play(expand_inputs(paths))
 
     def open_folder(self):
+        if self._folder_scan_thread is not None:
+            self.statusBar().showMessage("Ya hay un escaneo de carpeta en curso", 4000)
+            return
         folder = QFileDialog.getExistingDirectory(self, "Abrir carpeta", self._open_dir())
         if not folder:
             return
         self._remember_dir(folder)
-        found = scan_folder(folder)
+        self._start_folder_scan(folder)
+
+    def _start_folder_scan(self, folder: str):
+        self.cancel_folder_scan()
+        self._folder_scan_entries = []
+        self.act_cancel_folder_scan.setEnabled(True)
+        self.statusBar().showMessage(f"Escaneando carpeta: {folder}")
+        thread = QThread(self)
+        worker = FolderScanWorker(folder)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        # Solo metodos de la ventana como slots: PySide entrega una senal a un
+        # lambda en el hilo que la emite (el del escaneo), y estos tocan la UI.
+        # Un metodo de un QObject se encola al hilo de la ventana.
+        self._folder_scan_folder = folder
+        worker.batchFound.connect(self._on_folder_scan_batch)
+        worker.finished.connect(self._on_folder_scan_finished)
+        worker.cancelled.connect(self._on_folder_scan_cancelled)
+        worker.failed.connect(self._on_folder_scan_failed)
+        worker.finished.connect(thread.quit)
+        worker.cancelled.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_folder_scan_worker)
+        self._folder_scan_thread = thread
+        self._folder_scan_worker = worker
+        thread.start()
+
+    def _on_folder_scan_batch(self, batch: list):
+        self._folder_scan_entries.extend(batch)
+        noun = "archivo" if len(self._folder_scan_entries) == 1 else "archivos"
+        self.statusBar().showMessage(f"Escaneando carpeta… {len(self._folder_scan_entries)} {noun} encontrados")
+
+    def _on_folder_scan_finished(self, found: list):
+        self._finish_folder_scan(self._folder_scan_folder, found, cancelled=False)
+
+    def _on_folder_scan_cancelled(self, found: list):
+        self._finish_folder_scan(self._folder_scan_folder, found, cancelled=True)
+
+    def _finish_folder_scan(self, folder: str, found: list, cancelled: bool):
+        self._folder_scan_entries = list(found)
+        self.act_cancel_folder_scan.setEnabled(False)
         if not found:
-            QMessageBox.information(self, "Abrir carpeta", "No se encontraron archivos multimedia soportados.")
+            text = "Escaneo cancelado: no se encontraron archivos multimedia soportados." if cancelled else (
+                "No se encontraron archivos multimedia soportados."
+            )
+            QMessageBox.information(self, "Abrir carpeta", text)
             return
         self._add_and_maybe_play(found)
+        noun = "elemento agregado" if len(found) == 1 else "elementos agregados"
+        prefix = "Escaneo cancelado" if cancelled else "Carpeta agregada"
+        self.statusBar().showMessage(f"{prefix}: {len(found)} {noun}", 5000)
+
+    def _on_folder_scan_failed(self, error: str):
+        self.act_cancel_folder_scan.setEnabled(False)
+        QMessageBox.warning(self, "Abrir carpeta", f"No se pudo escanear la carpeta:\n{error}")
+
+    def _clear_folder_scan_worker(self):
+        self._folder_scan_thread = None
+        self._folder_scan_worker = None
+
+    def cancel_folder_scan(self):
+        if self._folder_scan_worker is not None:
+            self._folder_scan_worker.cancel()
+            self.statusBar().showMessage("Cancelando escaneo de carpeta…", 3000)
 
     def open_url(self):
         dialog = OpenUrlDialog(self.player.network_caching_ms, self.player.rtsp_tcp, self)
@@ -1278,11 +1361,8 @@ class MainWindow(QMainWindow):
         self._remember_dir(path)
         if not path.lower().endswith((".m3u", ".m3u8")):
             path += ".m3u8"
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(format_m3u(self.playlist_entries()))
-        except OSError as exc:
-            QMessageBox.warning(self, "Guardar lista", f"No se pudo guardar la lista:\n{exc}")
+        if not save_m3u_playlist(path, self.playlist_entries()):
+            QMessageBox.warning(self, "Guardar lista", f"No se pudo guardar la lista:\n{path}")
 
     def load_playlist(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1294,7 +1374,7 @@ class MainWindow(QMainWindow):
         if not os.path.isfile(path):
             QMessageBox.warning(self, "Cargar lista", f"No se pudo leer la lista:\n{path}")
             return
-        self._add_and_maybe_play(read_playlist_file(path))
+        self._add_and_maybe_play(load_m3u_playlist(path))
 
     def show_playlist_context_menu(self, pos):
         view = self.playlist_view
@@ -1362,12 +1442,14 @@ class MainWindow(QMainWindow):
             self._save_current_position()
             self.player.stop()
             self.player.stop_preview()
+            self._invalidate_position_markers(clear=True)
         self.playlist.remove_rows(rows)
 
     def clear_playlist(self):
         self._save_current_position()
         self.player.stop()
         self.player.stop_preview()
+        self._invalidate_position_markers(clear=True)
         self.playlist.clear()
 
     # ------------------------------------------------------------ transport
@@ -1388,6 +1470,7 @@ class MainWindow(QMainWindow):
         self._max_time_seen_ms = 0
         self._bookmarks_cache = None
         self._chapters_cache = None
+        self._invalidate_position_markers(clear=True)
         self._stall_timer.stop()
         self._buffer_fill = 0.0
         if self.player.preview_current_path() not in (None, path):
@@ -1401,7 +1484,15 @@ class MainWindow(QMainWindow):
         # La posicion guardada va como :start-time del Media (ver
         # VLCPlayer.load): arranca directo ahi.
         saved_ms = 0 if is_url(path) else (get_saved_position_ms(path) or 0)
+        audio_track, subtitle_track = ((None, None) if is_url(path) else get_saved_track_selection(path))
         self.player.load(path, enable_visualizer=self.act_visualizer.isChecked(), start_ms=saved_ms)
+        self._pending_track_restore = None
+        if audio_track is not None or subtitle_track is not None:
+            self._pending_track_restore = {
+                "generation": self.player.generation,
+                "audio_track": audio_track,
+                "subtitle_track": subtitle_track,
+            }
         pending_sub = self._pending_subtitles.pop(path_key(path), None)
         if pending_sub and os.path.exists(pending_sub):
             self.player.add_subtitle_before_play(pending_sub)
@@ -1422,6 +1513,7 @@ class MainWindow(QMainWindow):
         path = self._current_path_or_none()
         if path is None or is_url(path):
             return
+        save_track_selection(path, self.player.get_current_audio_track(), self.player.get_current_subtitle_track())
         save_position(path, self.player.get_time_ms(), self.player.get_length_ms())
 
     def _current_path_or_none(self):
@@ -1573,24 +1665,45 @@ class MainWindow(QMainWindow):
         if self.current_index == -1:
             return
         if self.loop_point_a is None:
-            self.loop_point_a = self.player.get_time_ms()
-            self.act_ab_loop.setToolTip(f"A: {format_time(self.loop_point_a)} — clic para marcar B")
-            self._show_osd(f"Punto A: {format_time(self.loop_point_a)}")
+            self._set_ab_point_a()
         elif self.loop_point_b is None:
-            candidate_b = self.player.get_time_ms()
-            if candidate_b <= self.loop_point_a:
-                self.statusBar().showMessage("El punto B debe ser posterior al punto A", 3000)
-                return
-            self.loop_point_b = candidate_b
-            text = f"A-B: {format_time(self.loop_point_a)}-{format_time(self.loop_point_b)}"
-            self.act_ab_loop.setToolTip(f"{text} — clic para desactivar")
-            self.act_ab_loop.setCheckable(True)
-            self.act_ab_loop.setChecked(True)
-            self._ab_timer.start()
-            self._show_osd(text)
+            self._set_ab_point_b()
         else:
-            self._clear_ab_loop()
-            self._show_osd("Bucle A-B desactivado")
+            self._clear_ab_loop_with_feedback()
+
+    def _set_ab_point_a(self):
+        if self.current_index == -1:
+            return
+        self.loop_point_a = self.player.get_time_ms()
+        self.loop_point_b = None
+        self._ab_timer.stop()
+        self.act_ab_loop.setChecked(False)
+        self.act_ab_loop.setCheckable(False)
+        self.act_ab_loop.setToolTip(f"A: {format_time(self.loop_point_a)} — clic para marcar B")
+        self._invalidate_position_markers()
+        self._show_osd(f"Punto A: {format_time(self.loop_point_a)}")
+
+    def _set_ab_point_b(self):
+        if self.current_index == -1 or self.loop_point_a is None:
+            return
+        candidate_b = self.player.get_time_ms()
+        if candidate_b <= self.loop_point_a:
+            self.statusBar().showMessage("El punto B debe ser posterior al punto A", 3000)
+            return
+        self.loop_point_b = candidate_b
+        text = f"A-B: {format_time(self.loop_point_a)}-{format_time(self.loop_point_b)}"
+        self.act_ab_loop.setToolTip(f"{text} — clic para desactivar")
+        self.act_ab_loop.setCheckable(True)
+        self.act_ab_loop.setChecked(True)
+        self._ab_timer.start()
+        self._invalidate_position_markers()
+        self._show_osd(text)
+
+    def _clear_ab_loop_with_feedback(self):
+        if self.loop_point_a is None and self.loop_point_b is None:
+            return
+        self._clear_ab_loop()
+        self._show_osd("Bucle A-B desactivado")
 
     def _clear_ab_loop(self):
         self.loop_point_a = None
@@ -1601,6 +1714,7 @@ class MainWindow(QMainWindow):
         self.act_ab_loop.setToolTip(
             "Marca un punto A, luego un punto B: repite en bucle solo ese tramo. Un tercer clic lo desactiva."
         )
+        self._invalidate_position_markers()
 
     def _check_ab_loop(self):
         if self.loop_point_b is not None and self.player.get_time_ms() >= self.loop_point_b:
@@ -1620,9 +1734,20 @@ class MainWindow(QMainWindow):
         return markers
 
     def _refresh_position_markers(self, length_ms: int):
+        if not self._position_markers_dirty and self._position_markers_length_ms == length_ms:
+            return
         markers = self._position_markers(length_ms)
         self.position_slider.set_markers(markers)
         self.fullscreen_controller.slider.set_markers(markers)
+        self._position_markers_dirty = False
+        self._position_markers_length_ms = length_ms
+
+    def _invalidate_position_markers(self, clear: bool = False):
+        self._position_markers_dirty = True
+        if clear:
+            self._position_markers_length_ms = 0
+            self.position_slider.set_markers([])
+            self.fullscreen_controller.slider.set_markers([])
 
     def _current_bookmarks(self) -> list:
         """Marcadores de la pista actual, leidos de disco una vez por pista
@@ -1637,6 +1762,7 @@ class MainWindow(QMainWindow):
 
     def _invalidate_bookmarks_cache(self):
         self._bookmarks_cache = None
+        self._invalidate_position_markers()
 
     def _current_chapters(self) -> list:
         """Capitulos del archivo actual; se vuelven a pedir a libVLC cuando
@@ -1948,7 +2074,7 @@ class MainWindow(QMainWindow):
             label = name.decode("utf-8", errors="ignore") if isinstance(name, bytes) else str(name)
             action = QAction(label, self.menu_audio_tracks, checkable=True)
             action.setChecked(track_id == current)
-            action.triggered.connect(lambda _checked, tid=track_id: self.player.set_audio_track(tid))
+            action.triggered.connect(lambda _checked, tid=track_id: self._select_audio_track(tid))
             group.addAction(action)
             self.menu_audio_tracks.addAction(action)
 
@@ -1961,9 +2087,39 @@ class MainWindow(QMainWindow):
             label = name.decode("utf-8", errors="ignore") if isinstance(name, bytes) else str(name)
             action = QAction(label, self.menu_subtitle_tracks, checkable=True)
             action.setChecked(track_id == current)
-            action.triggered.connect(lambda _checked, tid=track_id: self.player.set_subtitle_track(tid))
+            action.triggered.connect(lambda _checked, tid=track_id: self._select_subtitle_track(tid))
             group.addAction(action)
             self.menu_subtitle_tracks.addAction(action)
+
+    def _select_audio_track(self, track_id: int):
+        self.player.set_audio_track(track_id)
+        self._persist_current_track_selection()
+
+    def _select_subtitle_track(self, track_id: int):
+        self.player.set_subtitle_track(track_id)
+        self._persist_current_track_selection()
+
+    def _persist_current_track_selection(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            return
+        save_track_selection(path, self.player.get_current_audio_track(), self.player.get_current_subtitle_track())
+
+    def _restore_saved_tracks(self):
+        pending = self._pending_track_restore
+        if pending is None or pending.get("generation") != self.player.generation:
+            return
+        audio_track = pending.get("audio_track")
+        subtitle_track = pending.get("subtitle_track")
+        audio_ids = {track_id for track_id, _name in self.player.audio_tracks()}
+        subtitle_ids = {track_id for track_id, _name in self.player.subtitle_tracks()}
+        if audio_track is not None and (audio_track < 0 or audio_track in audio_ids):
+            if self.player.get_current_audio_track() != audio_track:
+                self.player.set_audio_track(audio_track)
+        if subtitle_track is not None and (subtitle_track < 0 or subtitle_track in subtitle_ids):
+            if self.player.get_current_subtitle_track() != subtitle_track:
+                self.player.set_subtitle_track(subtitle_track)
+        self._pending_track_restore = None
 
     def load_subtitle_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2212,6 +2368,10 @@ class MainWindow(QMainWindow):
         self.player.events.blockSignals(True)
         for timer in (self._ab_timer, self._stall_timer):
             timer.stop()
+        self.cancel_folder_scan()
+        if self._folder_scan_thread is not None:
+            self._folder_scan_thread.quit()
+            self._folder_scan_thread.wait(3000)
         self.preview.stop_timers()
         # Los hilos de subtitulos que sigan en marcha no deben destruirse
         # corriendo (error fatal de Qt): se espera un poco a que terminen.

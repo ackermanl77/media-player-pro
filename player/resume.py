@@ -25,15 +25,17 @@ def positions_file() -> Path:
 
 
 def _load_all() -> dict:
-    """{clave -> ms}, en orden de guardado (el mas reciente al final).
-    Descarta entradas con tipos invalidos y migra claves viejas (guardadas
-    con la ruta tal cual llegaba, antes de path_key()) a su forma
-    normalizada."""
+    """{clave -> {position_ms?, audio_track?, subtitle_track?}}, en orden de
+    guardado (el mas reciente al final). Acepta el formato viejo
+    {clave -> ms} y lo migra en memoria al nuevo esquema por archivo."""
     raw = load_json(positions_file(), dict, {})
     data = {}
     for key, value in raw.items():
-        if isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool):
-            data[path_key(key)] = value
+        if not isinstance(key, str):
+            continue
+        entry = _normalize_entry(value)
+        if entry:
+            data[path_key(key)] = entry
     return data
 
 
@@ -46,7 +48,17 @@ def _save_all(data: dict) -> None:
 
 
 def get_saved_position_ms(path: str):
-    return _load_all().get(path_key(path))
+    entry = _load_all().get(path_key(path), {})
+    return entry.get("position_ms")
+
+
+def get_saved_track_selection(path: str) -> tuple[int | None, int | None]:
+    entry = _load_all().get(path_key(path), {})
+    return entry.get("audio_track"), entry.get("subtitle_track")
+
+
+def save_track_selection(path: str, audio_track: int | None, subtitle_track: int | None) -> None:
+    _save_entry_fields(path, audio_track=audio_track, subtitle_track=subtitle_track)
 
 
 def save_position(path: str, position_ms: int, length_ms: int) -> None:
@@ -55,16 +67,48 @@ def save_position(path: str, position_ms: int, length_ms: int) -> None:
     if position_ms < RESUME_THRESHOLD_START_MS or position_ms >= length_ms * RESUME_THRESHOLD_END_FRACTION:
         clear_position(path)
         return
-    data = _load_all()
-    key = path_key(path)
-    data.pop(key, None)  # re-insertar al final: pasa a ser la mas reciente
-    data[key] = int(position_ms)
-    _save_all(data)
+    _save_entry_fields(path, position_ms=int(position_ms))
 
 
 def clear_position(path: str) -> None:
     data = _load_all()
     key = path_key(path)
-    if key in data:
-        del data[key]
+    if key in data and "position_ms" in data[key]:
+        data[key] = dict(data[key])
+        del data[key]["position_ms"]
+        if not data[key]:
+            del data[key]
         _save_all(data)
+
+
+def _normalize_int(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _normalize_entry(value) -> dict:
+    if (position_ms := _normalize_int(value)) is not None:
+        return {"position_ms": position_ms}
+    if not isinstance(value, dict):
+        return {}
+    entry = {}
+    for field in ("position_ms", "audio_track", "subtitle_track"):
+        normalized = _normalize_int(value.get(field))
+        if normalized is not None:
+            entry[field] = normalized
+    return entry
+
+
+def _save_entry_fields(path: str, **fields) -> None:
+    data = _load_all()
+    key = path_key(path)
+    entry = dict(data.get(key, {}))
+    for field, value in fields.items():
+        normalized = _normalize_int(value)
+        if normalized is None:
+            entry.pop(field, None)
+        else:
+            entry[field] = normalized
+    data.pop(key, None)  # reinsertar al final: la entrada vuelve a ser la mas reciente
+    if entry:
+        data[key] = entry
+    _save_all(data)

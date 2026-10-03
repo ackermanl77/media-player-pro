@@ -7,3 +7,6 @@ build/
 dist/
 *.egg-info/
 .build-venv/
+
+# Ajustes locales del editor
+.vscode/
