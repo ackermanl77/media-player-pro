@@ -53,6 +53,8 @@ VLC_PLUGIN_DIRS_EXCLUDED = {
 binaries = []
 if os.environ.get("BUNDLE_VLC") == "1":
     vlc_dir = os.environ.get("VLC_DIR", r"C:\Program Files\VideoLAN\VLC")
+    # Licencias y enlace al codigo fuente: obligatorios al redistribuir libVLC.
+    datas.append(("licenses", "licenses"))
     for dll in ("libvlc.dll", "libvlccore.dll"):
         binaries.append((os.path.join(vlc_dir, dll), "vlc"))
     plugins_root = os.path.join(vlc_dir, "plugins")

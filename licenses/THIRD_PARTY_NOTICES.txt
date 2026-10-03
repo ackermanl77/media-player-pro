@@ -1,0 +1,22 @@
+THIRD-PARTY NOTICES - Reproductor Multimedia Pro
+================================================
+
+VLC media player / libVLC  (only present when built with BUNDLE_VLC=1)
+----------------------------------------------------------------------
+This package may include libvlc.dll, libvlccore.dll and a subset of VLC
+plugins (folder "_internal\vlc"), taken unmodified from VLC 3.0.23.
+
+  Copyright (C) the VideoLAN team. https://www.videolan.org/vlc/
+  libVLC / libvlccore: GNU LGPL v2.1 or later  -> VLC-COPYING.LIB.txt
+  VLC plugins and programs:  GNU GPL v2 or later -> VLC-COPYING.txt
+
+Corresponding source code for the bundled version (VLC 3.0.23):
+  https://download.videolan.org/pub/videolan/vlc/3.0.23/vlc-3.0.23.tar.xz
+  Project page and git: https://www.videolan.org/vlc/  /  https://code.videolan.org/videolan/vlc
+
+The binaries are unmodified. You may replace the files in "_internal\vlc"
+with another build of the same VLC series; the application falls back to a
+system-installed VLC if that folder is absent.
+
+Other components: PySide6 / Qt (LGPL v3), python-vlc (LGPL v2.1+).
+Their licences are included in their respective folders under "_internal".
