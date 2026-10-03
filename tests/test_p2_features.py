@@ -118,6 +118,7 @@ def test_instance_fallback_drops_optional_groups_in_order():
         create_instance_with_fallback(["--bad"], [], factory)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="GPU video options (d3d11va, RTX VSR/HDR) are Windows-only libVLC features")
 def test_unknown_gpu_option_degrades_instead_of_breaking_playback(window, monkeypatch, tmp_path):
     monkeypatch.setattr(backend_module, "gpu_instance_args", lambda *a: ["--opcion-que-no-existe"])
     window.act_gpu_upscale.setChecked(True) if window.menu_gpu is not None else window.player.set_gpu_options(
@@ -132,6 +133,7 @@ def test_unknown_gpu_option_degrades_instead_of_breaking_playback(window, monkey
     assert _pump(lambda: window.player.playback_state() == PlaybackState.PLAYING)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="GPU video options (d3d11va, RTX VSR/HDR) are Windows-only libVLC features")
 def test_gpu_flags_are_accepted_by_the_installed_libvlc_and_trigger_recreation(headless):
     assert gpu_instance_args(True, True, "d3d11va") == [
         "--avcodec-hw=d3d11va", "--d3d11-upscale-mode=super", "--d3d11-hdr-mode=generate"]

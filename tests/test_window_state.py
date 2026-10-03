@@ -16,6 +16,8 @@ except OSError:
     pytest.skip("VLC (libvlc) no esta instalado; se omiten estas pruebas.", allow_module_level=True)
 
 from PySide6.QtCore import QEvent, QRect, Qt
+
+from player.formats import normalize_path
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication
 
@@ -244,7 +246,9 @@ def test_playlist_and_current_item_are_restored_without_autoplay(make_window, mo
     window.close()
 
     again = make_window()
-    assert again.playlist_entries() == [os.path.normpath("C:/fake/a.mp3"), os.path.normpath("C:/fake/b.mkv"),
+    # normalize_path(): "C:/fake/..." is absolute on Windows but relative (made
+    # absolute under the cwd) on the Ubuntu CI job.
+    assert again.playlist_entries() == [normalize_path("C:/fake/a.mp3"), normalize_path("C:/fake/b.mkv"),
                                         "https://example.com/radio"]
     assert again.current_index == -1 and again.player.is_idle()  # no arranca solo
     assert again.playlist_view.current_source_row() == 1
@@ -269,7 +273,7 @@ def test_session_is_written_after_the_debounce(make_window):
     window.add_files_to_playlist(["C:/fake/x.mp3"])
     assert settings_module.load_session().entries == []
     window._session_save_timer.timeout.emit()  # lo que haria el timer tras 1 s
-    assert settings_module.load_session().entries == [os.path.normpath("C:/fake/x.mp3")]
+    assert settings_module.load_session().entries == [normalize_path("C:/fake/x.mp3")]
 
 
 def test_turning_off_restore_session_clears_it(make_window):

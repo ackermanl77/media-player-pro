@@ -11,6 +11,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication
 
+from player.formats import normalize_path
 from player.playlist_controller import PlaylistController
 from player.playlist_model import (
     DURATION_ROLE,
@@ -126,8 +127,9 @@ def test_sort_by_name_and_path_is_natural_and_keeps_current(controller):
     assert _names(controller) == ["otra.mp3", "Pista 2.mp3", "Pista 10.mp3"]
     assert controller.current_index == 2
     controller.sort("path")
-    assert [p.replace("\\", "/") for p in controller.entries()] == [
-        "C:/a/Pista 2.mp3", "C:/m/otra.mp3", "C:/z/Pista 10.mp3"]
+    # normalize_path(): the same "C:/..." is absolute on Windows, cwd-relative on Linux.
+    assert controller.entries() == [
+        normalize_path(p) for p in ("C:/a/Pista 2.mp3", "C:/m/otra.mp3", "C:/z/Pista 10.mp3")]
     assert controller.current_index == 2
 
 
