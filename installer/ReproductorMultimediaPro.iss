@@ -59,6 +59,8 @@ Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\DefaultIcon"; ValueType: s
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\enqueue"; ValueType: string; ValueData: "Agregar a la lista de {#AppName}"
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\enqueue\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --enqueue ""%1"""
+; Clave padre de Capabilities: sin esto quedaba vacia tras desinstalar.
+Root: HKCU; Subkey: "Software\{#AppKey}"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\{#AppKey}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\{#AppKey}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Reproductor de música y video basado en libVLC"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppKey}\Capabilities"; Flags: uninsdeletevalue
