@@ -113,11 +113,11 @@ instalador), manualmente o automáticamente tras cada push a
 Actions; la última, del 2026-10-03, pasó). Ver
 [docs/workflows/packaging/workflow.md](workflows/packaging/workflow.md).
 Al subir una etiqueta `v<version>` (igual a `player.__version__`, hoy
-`0.1.0`), `.github/workflows/release.yml` corre el CI completo y luego
+`0.2.0`), `.github/workflows/release.yml` corre el CI completo y luego
 construye la carpeta onedir, el `.zip`, el instalador y `SHA256SUMS.txt`, y
-los publica como GitHub Release. **Todavía no se ejecutó**: el Release
-`v0.1.0` que existe en GitHub (2026-09-19) es anterior a este workflow y
-trae el antiguo `.exe` de un solo archivo.
+los publica como GitHub Release. `v0.2.0` (2026-10-06) es el primer Release
+hecho por este workflow; el `v0.1.0` (2026-09-19) es anterior y trae el
+antiguo `.exe` de un solo archivo.
 
 No empaqueta VLC por defecto: la máquina que ejecute el `.exe` necesita VLC
 3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado, con
