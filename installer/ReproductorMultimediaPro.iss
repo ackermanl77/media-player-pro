@@ -28,6 +28,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist\installer
 OutputBaseFilename=ReproductorMultimediaPro-{#AppVersion}-setup
+; packaging/sign_and_package.py pasa /DSign y la herramienta "codesign":
+; Inno Setup firma este instalador y el desinstalador que escribe.
+#ifdef Sign
+SignTool=codesign
+SignedUninstaller=yes
+#endif
 SetupIconFile=..\player\assets\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2

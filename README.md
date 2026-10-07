@@ -216,6 +216,12 @@ pyinstaller --noconfirm ReproductorMultimediaPro.spec
 iscc /DAppVersion=0.1.0 installer\ReproductorMultimediaPro.iss
 ```
 
+Para firmar (Authenticode) el `.exe`, el instalador y su desinstalador, en
+lugar del `iscc` de arriba: `set CODESIGN_THUMBPRINT=<huella SHA-1>` (un
+certificado de firma de código del almacén de Windows) y
+`python packaging/sign_and_package.py`. Usa signtool del Windows SDK y sella
+con `CODESIGN_TIMESTAMP_URL` (por defecto DigiCert).
+
 VLC no se incluye por defecto: la máquina destino necesita VLC 3.0 de 64
 bits instalado (si falta, o es de 32 bits, la app lo explica al arrancar).
 Opcionalmente, `BUNDLE_VLC=1` (y `VLC_DIR` si VLC no está en la ruta
