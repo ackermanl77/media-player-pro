@@ -61,6 +61,19 @@ def save_track_selection(path: str, audio_track: int | None, subtitle_track: int
     _save_entry_fields(path, audio_track=audio_track, subtitle_track=subtitle_track)
 
 
+def get_saved_delays(path: str) -> tuple[int, int]:
+    """(desfase de audio, desfase de subtitulos) guardados para el archivo,
+    en ms; 0 cuando no hay."""
+    entry = _load_all().get(path_key(path), {})
+    return entry.get("audio_delay_ms", 0), entry.get("subtitle_delay_ms", 0)
+
+
+def save_delays(path: str, audio_delay_ms: int, subtitle_delay_ms: int) -> None:
+    """Un desfase de 0 no se guarda (el archivo no gana una entrada solo por
+    eso, y volver a 0 la borra)."""
+    _save_entry_fields(path, audio_delay_ms=audio_delay_ms or None, subtitle_delay_ms=subtitle_delay_ms or None)
+
+
 def save_position(path: str, position_ms: int, length_ms: int) -> None:
     if length_ms <= 0:
         return
@@ -91,7 +104,7 @@ def _normalize_entry(value) -> dict:
     if not isinstance(value, dict):
         return {}
     entry = {}
-    for field in ("position_ms", "audio_track", "subtitle_track"):
+    for field in ("position_ms", "audio_track", "subtitle_track", "audio_delay_ms", "subtitle_delay_ms"):
         normalized = _normalize_int(value.get(field))
         if normalized is not None:
             entry[field] = normalized

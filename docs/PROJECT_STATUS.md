@@ -450,8 +450,6 @@ Detalle por archivo en
 - **Solo "Abrir carpeta" se recorre en segundo plano**: una carpeta
   arrastrada sobre la ventana, pasada por línea de comandos o reenviada
   por otra instancia se expande en el hilo de la UI (con orden natural).
-- **No se recuerda por archivo** el desfase de audio ni el de subtítulos
-  (sí las pistas elegidas y la posición).
 
 ## Recently Fixed
 

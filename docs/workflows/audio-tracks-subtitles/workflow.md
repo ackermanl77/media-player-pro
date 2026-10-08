@@ -31,8 +31,11 @@ opción "Disable" que libVLC siempre reporta).
 
 **Menú Video → "Adelantar/Retrasar subtítulos 50 ms"** (atajos `G`/`H`) o
 **"Restablecer sincronía de subtítulos"**. El desfase del audio funciona
-igual (Audio → "Adelantar/Retrasar audio 50 ms", `J`/`K`). Ninguno de los
-dos desfases se recuerda por archivo. Ajusta `video_set_spu_delay()` en vivo —
+igual (Audio → "Adelantar/Retrasar audio 50 ms", `J`/`K`). Los dos
+desfases se recuerdan **por archivo local** (en `positions.json`): al volver
+a abrirlo se aplican en cuanto empieza a reproducir (libVLC los vuelve a 0
+con cada Media nuevo) y la barra de estado lo avisa; volver a 0 borra lo
+guardado. Ajusta `video_set_spu_delay()` en vivo —
 efecto inmediato, no requiere recargar nada. Útil cuando un subtítulo
 descargado por separado no está perfectamente alineado con el audio.
 

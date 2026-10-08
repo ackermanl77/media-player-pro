@@ -332,3 +332,23 @@ def test_loop_between_bookmarks_uses_the_surrounding_marks(window, monkeypatch):
     _fake_track(window, monkeypatch, now_ms=45_000, marks=(40_000,))
     window._loop_between_bookmarks()   # no mark after: up to the end
     assert (window.loop_point_a, window.loop_point_b) == (40_000, 60_000)
+
+
+def test_audio_and_subtitle_delays_are_remembered_per_file(window, headless):
+    first = _wav(headless / "first.wav", 20)
+    second = _wav(headless / "second.wav", 20)
+    window.add_files_to_playlist([first, second])
+    window.play_index(0)
+    assert _pump_until(window, lambda: _state(window) == vlc.State.Playing)
+    window._set_audio_delay(150)
+    window._set_subtitle_delay(-250)
+    assert resume.get_saved_delays(first) == (150, -250)
+    window.play_index(1)  # a file without saved delays starts at 0
+    assert _pump_until(window, lambda: _state(window) == vlc.State.Playing)
+    assert window.player.get_audio_delay_ms() == 0
+    assert resume.get_saved_delays(second) == (0, 0)
+    window.play_index(0)
+    assert _pump_until(window, lambda: _state(window) == vlc.State.Playing)
+    assert _pump_until(window, lambda: window.player.get_audio_delay_ms() == 150)
+    assert window.player.get_subtitle_delay_ms() == -250
+    assert resume.get_saved_delays(first) == (150, -250)

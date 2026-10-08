@@ -64,7 +64,15 @@ from .playlist_order import playback_failed
 from .power import POWER_ACTIONS, PowerCountdownDialog, run_power_action
 from .preview_controller import PreviewController
 from .recent_files import add_recent_file, clear_recent_files, get_recent_files
-from .resume import clear_position, get_saved_position_ms, get_saved_track_selection, save_position, save_track_selection
+from .resume import (
+    clear_position,
+    get_saved_delays,
+    get_saved_position_ms,
+    get_saved_track_selection,
+    save_delays,
+    save_position,
+    save_track_selection,
+)
 from .settings import (
     MAX_RATE,
     MAX_VOLUME,
@@ -189,6 +197,7 @@ class MainWindow(QMainWindow):
         # se cargan la proxima vez que se abra (ver _on_online_subtitle_ready).
         self._pending_subtitles = {}
         self._pending_track_restore = None
+        self._pending_delay_restore = None  # (generacion, audio_ms, subtitulos_ms)
         self._stream_visualizer_gen = -1
         self._stall_time_ms = 0
         self._stall_box = None
@@ -1051,6 +1060,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Reproduciendo: {self._display_name(path)}")
         self._chapters_cache = None
         self._restore_saved_tracks()
+        self._restore_saved_delays()
         self._maybe_schedule_stream_visualizer(gen)
 
     def _on_buffering(self, gen: int, percent: float):
@@ -1496,6 +1506,10 @@ class MainWindow(QMainWindow):
         audio_track, subtitle_track = ((None, None) if is_url(path) else get_saved_track_selection(path))
         self.player.load(path, enable_visualizer=self.act_visualizer.isChecked(), start_ms=saved_ms)
         self._pending_track_restore = None
+        # libVLC vuelve los desfases a 0 con cada Media: los guardados para
+        # este archivo se aplican cuando empieza a reproducir (_on_playing).
+        delays = (0, 0) if is_url(path) else get_saved_delays(path)
+        self._pending_delay_restore = (self.player.generation, *delays) if any(delays) else None
         if audio_track is not None or subtitle_track is not None:
             self._pending_track_restore = {
                 "generation": self.player.generation,
@@ -1524,6 +1538,7 @@ class MainWindow(QMainWindow):
             return
         save_track_selection(path, self.player.get_current_audio_track(), self.player.get_current_subtitle_track())
         save_position(path, self.player.get_time_ms(), self.player.get_length_ms())
+        self._persist_current_delays()
 
     def _current_path_or_none(self):
         return self.playlist.current_path()
@@ -2206,11 +2221,35 @@ class MainWindow(QMainWindow):
                 f"Subtítulo descargado para {os.path.basename(video_path)}: se usará al abrirlo", 6000
             )
 
+    def _restore_saved_delays(self):
+        """Aplica una vez los desfases guardados para el archivo que se acaba
+        de abrir (ver play_index)."""
+        pending = self._pending_delay_restore
+        if pending is None or pending[0] != self.player.generation:
+            return
+        self._pending_delay_restore = None
+        _gen, audio_ms, subtitle_ms = pending
+        if audio_ms:
+            self.player.set_audio_delay_ms(audio_ms)
+        if subtitle_ms:
+            self.player.set_subtitle_delay_ms(subtitle_ms)
+        parts = [f"audio {audio_ms:+d} ms" if audio_ms else "", f"subtítulos {subtitle_ms:+d} ms" if subtitle_ms else ""]
+        self.statusBar().showMessage("Sincronía guardada para este archivo: " + ", ".join(p for p in parts if p), 4000)
+
+    def _persist_current_delays(self):
+        path = self._current_path_or_none()
+        if path is None or is_url(path):
+            return
+        if self._pending_delay_restore is not None:
+            return  # todavia no se aplicaron: no pisar lo guardado con los 0 de libVLC
+        save_delays(path, self.player.get_audio_delay_ms(), self.player.get_subtitle_delay_ms())
+
     def _adjust_subtitle_delay(self, delta_ms: int):
         self._set_subtitle_delay(self.player.get_subtitle_delay_ms() + delta_ms)
 
     def _set_subtitle_delay(self, delay_ms: int):
         self.player.set_subtitle_delay_ms(delay_ms)
+        self._persist_current_delays()
         sign = "+" if delay_ms >= 0 else ""
         self.statusBar().showMessage(f"Sincronía de subtítulos: {sign}{delay_ms} ms", 3000)
         self._show_osd(f"Subtítulos: {sign}{delay_ms} ms")
@@ -2224,6 +2263,7 @@ class MainWindow(QMainWindow):
         if self.current_index == -1:
             return
         self.player.set_audio_delay_ms(delay_ms)
+        self._persist_current_delays()
         sign = "+" if delay_ms >= 0 else ""
         self._show_osd(f"Audio: {sign}{delay_ms} ms")
         self.statusBar().showMessage(f"Sincronía de audio: {sign}{delay_ms} ms", 3000)

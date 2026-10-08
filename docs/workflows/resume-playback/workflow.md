@@ -30,7 +30,8 @@ sesión y la siguiente, sin intervención manual.
 ## Dónde vive
 
 `~/.reproductor_multimedia_pro/positions.json` — `{"ruta normalizada":
-{"position_ms": ..., "audio_track": ..., "subtitle_track": ...}}` (cada
+{"position_ms": ..., "audio_track": ..., "subtitle_track": ...,
+"audio_delay_ms": ..., "subtitle_delay_ms": ...}}` (cada
 campo es opcional; el formato viejo `{"ruta": ms}` se migra al leerlo).
 Guarda como mucho 1000 archivos (se descartan los más antiguos). Se
 escribe de forma atómica con copia `.bak` (`player/jsonstore.py`) y se

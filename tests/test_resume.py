@@ -90,3 +90,15 @@ def test_invalid_track_values_are_ignored(monkeypatch, tmp_path):
     )
     assert resume.get_saved_position_ms("video.mkv") == 1000
     assert resume.get_saved_track_selection("video.mkv") == (None, None)
+
+
+def test_delays_round_trip_and_zero_removes_them(monkeypatch, tmp_path):
+    _use_tmp_home(monkeypatch, tmp_path)
+    assert resume.get_saved_delays("video.mkv") == (0, 0)
+    resume.save_delays("video.mkv", 150, -300)
+    assert resume.get_saved_delays("video.mkv") == (150, -300)
+    resume.save_track_selection("video.mkv", 2, None)
+    assert resume.get_saved_delays("video.mkv") == (150, -300)  # other fields don't drop them
+    resume.save_delays("video.mkv", 0, 0)
+    assert resume.get_saved_delays("video.mkv") == (0, 0)
+    assert resume.get_saved_track_selection("video.mkv") == (2, None)
