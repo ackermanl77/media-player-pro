@@ -392,7 +392,8 @@ def test_open_paths_and_instance_messages_expand_folders(window, tmp_path):
     played = []
     window.play_index = lambda index, user=True: played.append(index)
     window.handle_instance_message("enqueue", [str(tmp_path / "d")])
-    assert window.playlist_entries() == [str(tmp_path / "d" / "x.wav")]
+    # A folder is expanded on a background thread, then added on the UI thread.
+    assert _pump(lambda: window.playlist_entries() == [str(tmp_path / "d" / "x.wav")])
     assert played == [0]  # no sonaba nada: arranca igual
     window.current_index = 0
     window.handle_instance_message("enqueue", ["https://x/radio"])
@@ -526,3 +527,15 @@ def test_buffered_range_follows_the_network_cache_of_a_seekable_stream(window):
     window.update_ui()
     assert window.position_slider.buffered_range() is None
     window._stall_timer.stop()
+
+
+def test_input_scans_queue_instead_of_dropping_the_second(window, tmp_path):
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+        _wav(tmp_path / name / f"{name}.wav", 1)
+    results = []
+    window._start_input_scan([str(tmp_path / "one")], lambda found, cancelled: results.append(found), "1")
+    window._start_input_scan([str(tmp_path / "two")], lambda found, cancelled: results.append(found), "2")
+    assert len(window._input_scan_queue) == 1  # waits for the first scan
+    assert _pump(lambda: len(results) == 2)
+    assert results == [[str(tmp_path / "one" / "one.wav")], [str(tmp_path / "two" / "two.wav")]]

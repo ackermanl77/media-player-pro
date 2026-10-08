@@ -1,7 +1,16 @@
 """Expansion de entradas (carpetas, .m3u, URLs) y orden natural."""
 import os
 
-from player.inputs import expand_inputs, filter_dropped, natural_sort_key, scan_folder, scan_folder_batches
+from player.inputs import (
+    dropped_inputs,
+    expand_inputs,
+    expand_inputs_batches,
+    filter_dropped,
+    natural_sort_key,
+    needs_scan,
+    scan_folder,
+    scan_folder_batches,
+)
 
 
 def _touch(path):
@@ -77,3 +86,26 @@ def test_dropped_files_skip_non_media_but_expand_folders_and_lists(tmp_path):
     playlist = tmp_path / "l.m3u"
     playlist.write_text(media + "\n", encoding="utf-8")
     assert filter_dropped([media, other, str(playlist), "https://x/y"]) == [media, media, "https://x/y"]
+
+
+def test_expand_inputs_batches_match_expand_inputs(tmp_path):
+    _touch(tmp_path / "musica" / "a.mp3")
+    _touch(tmp_path / "musica" / "sub" / "c.mp3")
+    _touch(tmp_path / "otra" / "b.ogg")
+    playlist = tmp_path / "lista.m3u8"
+    playlist.write_text("#EXTM3U\notra/b.ogg\nhttp://radio/stream\n", encoding="utf-8")
+    inputs = [str(tmp_path / "musica"), str(playlist), "srt://host:9000", "", str(tmp_path / "x.dat")]
+    for size in (1, 2, 200):
+        batches = list(expand_inputs_batches(inputs, batch_size=size))
+        assert all(0 < len(b) <= size for b in batches)
+        assert [e for b in batches for e in b] == expand_inputs(inputs)
+
+
+def test_needs_scan_and_dropped_inputs(tmp_path):
+    media = _touch(tmp_path / "a.mp3")
+    other = _touch(tmp_path / "notes.txt")
+    folder = tmp_path / "d"
+    folder.mkdir()
+    assert not needs_scan([media, "https://x/y", ""])
+    assert needs_scan([media, str(folder)])
+    assert dropped_inputs([media, other, str(folder), "https://x/y"]) == [media, str(folder), "https://x/y"]

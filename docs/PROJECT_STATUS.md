@@ -447,9 +447,6 @@ Detalle por archivo en
   expone qué bytes ya bajó; se dibuja el llenado de su caché de red
   (`:network-caching`, 1 s por defecto) delante de la posición, así que
   nunca muestra más que ese tamaño. Falta verla con un stream real.
-- **Solo "Abrir carpeta" se recorre en segundo plano**: una carpeta
-  arrastrada sobre la ventana, pasada por línea de comandos o reenviada
-  por otra instancia se expande en el hilo de la UI (con orden natural).
 
 ## Recently Fixed
 

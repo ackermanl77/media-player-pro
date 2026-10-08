@@ -127,12 +127,56 @@ def expand_inputs(paths, should_stop=None) -> list:
     return result
 
 
+def needs_scan(paths) -> bool:
+    """True si alguna entrada es una carpeta local: recorrerla puede tardar,
+    asi que la UI la expande en segundo plano (ver expand_inputs_batches)."""
+    return any(raw and raw.strip() and not is_url(raw) and os.path.isdir(normalize_path(raw)) for raw in paths)
+
+
+def expand_inputs_batches(paths, batch_size: int = 200, should_stop=None):
+    """Lo mismo que expand_inputs(), en el mismo orden, pero en lotes de hasta
+    `batch_size` entradas (las carpetas via scan_folder_batches) para
+    recorrerlo fuera del hilo de la UI con progreso y cancelacion."""
+    if batch_size <= 0:
+        raise ValueError("batch_size debe ser > 0")
+    pending = []
+
+    def full_batches():
+        nonlocal pending
+        while len(pending) >= batch_size:
+            yield pending[:batch_size]
+            pending = pending[batch_size:]
+
+    for raw in paths:
+        if not raw or not raw.strip():
+            continue
+        if should_stop is not None and should_stop():
+            break
+        if is_url(raw):
+            pending.append(raw.strip())
+        else:
+            local = normalize_path(raw)
+            if os.path.isdir(local):
+                for found in scan_folder_batches(local, batch_size, should_stop):
+                    pending.extend(found)
+                    yield from full_batches()
+            elif is_playlist_file(local):
+                pending.extend(read_playlist_file(local))
+            else:
+                pending.append(local)
+        yield from full_batches()
+    if pending:  # tambien al cancelar: lo encontrado hasta ahi no se pierde
+        yield pending
+
+
+def dropped_inputs(paths) -> list:
+    """Lo soltado que cuenta, sin expandir: URLs, carpetas, listas y medios
+    (soltar un .txt o un .exe por error no debe agregarlo)."""
+    return [p for p in paths if is_url(p) or os.path.isdir(p) or is_playlist_file(p) or is_media_file(p)]
+
+
 def filter_dropped(paths) -> list:
     """Lo soltado sobre la ventana: igual que expand_inputs pero un archivo
     suelto solo cuenta si es un medio o una lista (soltar un .txt o un .exe
     por error no debe agregarlo)."""
-    keep = []
-    for p in paths:
-        if is_url(p) or os.path.isdir(p) or is_playlist_file(p) or is_media_file(p):
-            keep.append(p)
-    return expand_inputs(keep)
+    return expand_inputs(dropped_inputs(paths))

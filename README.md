@@ -69,8 +69,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - **Abrir carpeta** la recorre en segundo plano: la ventana sigue
   respondiendo, la barra de estado muestra "Escaneando carpeta… N archivos
   encontrados" y Archivo → "Cancelar escaneo de carpeta" la detiene
-  (lo encontrado hasta ese momento se agrega igual). Las carpetas
-  arrastradas o pasadas por línea de comandos se recorren al momento.
+  (lo encontrado hasta ese momento se agrega igual). Lo mismo con las
+  carpetas arrastradas, pasadas por línea de comandos o reenviadas por otra
+  instancia (un segundo escaneo espera a que termine el primero).
 - **Una sola ventana**: abrir un archivo con el programa ya abierto lo manda
   a esa ventana (Archivo → "Permitir varias ventanas" o `--new-window` para
   desactivarlo; `--enqueue` solo lo agrega a la lista).

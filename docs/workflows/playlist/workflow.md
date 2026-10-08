@@ -14,8 +14,12 @@ aleatorio/repetir, y poder guardar/recuperar esa cola como un archivo
   reproduce. "Abrir carpeta" se recorre en segundo plano
   (`player/folder_scan.py`): la barra de estado cuenta lo encontrado y
   Archivo → "Cancelar escaneo de carpeta" lo detiene y agrega lo
-  encontrado hasta ese momento; las carpetas arrastradas o pasadas por
-  línea de comandos se expanden al momento. Cada fila muestra un ícono según su tipo (🎵 audio, 🎬 video,
+  encontrado hasta ese momento. Las carpetas arrastradas, pasadas por
+  línea de comandos o reenviadas por otra instancia también
+  (`MainWindow._start_input_scan()`, que expande la lista entera con
+  `inputs.expand_inputs_batches()` en el mismo orden que `expand_inputs()`);
+  un escaneo que llega con otro en curso espera su turno en una cola, y lo
+  que no tiene carpetas se sigue agregando al momento. Cada fila muestra un ícono según su tipo (🎵 audio, 🎬 video,
   🌐 stream/URL); la duración y las etiquetas ("Artista — Título") se leen
   en segundo plano (`MediaInfoProbe`, de a 4 archivos) y el título del
   panel muestra la cantidad y el total. Una radio muestra el título ICY

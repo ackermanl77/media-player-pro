@@ -1,12 +1,13 @@
-"""Escaneo de carpetas fuera del hilo principal.
+"""Escaneo de carpetas (y expansion de entradas que las incluyen) fuera del
+hilo principal.
 
-La logica de recorrido vive en player.inputs.scan_folder_batches() (pura,
+La logica de recorrido vive en player.inputs.expand_inputs_batches() (pura,
 sin Qt). Este modulo solo la ejecuta en un QObject para moverlo a un
 QThread y emitir resultados por senales."""
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from .inputs import scan_folder_batches
+from .inputs import expand_inputs_batches
 
 
 class FolderScanWorker(QObject):
@@ -15,9 +16,12 @@ class FolderScanWorker(QObject):
     cancelled = Signal(list)
     failed = Signal(str)
 
-    def __init__(self, folder: str, batch_size: int = 200):
+    def __init__(self, folder_or_paths, batch_size: int = 200):
+        """Una carpeta (Abrir carpeta) o una lista de entradas a expandir como
+        expand_inputs() (arrastrar y soltar, linea de comandos, otra
+        instancia)."""
         super().__init__()
-        self.folder = folder
+        self.paths = [folder_or_paths] if isinstance(folder_or_paths, str) else list(folder_or_paths)
         self.batch_size = batch_size
         self._cancelled = False
 
@@ -31,7 +35,7 @@ class FolderScanWorker(QObject):
     def run(self) -> None:
         found = []
         try:
-            for batch in scan_folder_batches(self.folder, batch_size=self.batch_size, should_stop=self.is_cancelled):
+            for batch in expand_inputs_batches(self.paths, batch_size=self.batch_size, should_stop=self.is_cancelled):
                 if self._cancelled:
                     break
                 found.extend(batch)

@@ -63,7 +63,7 @@ def test_main_window_connects_scan_results_to_methods_not_lambdas():
 
     from player import main_window
 
-    source = inspect.getsource(main_window.MainWindow._start_folder_scan)
+    source = inspect.getsource(main_window.MainWindow._start_input_scan)
     for signal in ("finished", "cancelled", "batchFound", "failed"):
         assert f"worker.{signal}.connect(lambda" not in source
 
@@ -83,3 +83,13 @@ def test_folder_scan_worker_can_be_cancelled(tmp_path):
     worker.run()
 
     assert cancelled == [[first]]
+
+
+def test_the_worker_expands_a_list_of_inputs_in_order(tmp_path):
+    loose = _touch(tmp_path / "loose.mp3")
+    inside = _touch(tmp_path / "d" / "x.mp3")
+    worker = FolderScanWorker([loose, str(tmp_path / "d"), "https://x/radio"], batch_size=1)
+    finished = []
+    worker.finished.connect(lambda found: finished.append(found))
+    worker.run()
+    assert finished == [[loose, inside, "https://x/radio"]]

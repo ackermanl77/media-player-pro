@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import sys
+from functools import partial
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QStandardPaths, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import (
@@ -60,7 +61,7 @@ from .formats import (
     snapshot_file_name,
 )
 from .fullscreen import FullscreenMode
-from .inputs import expand_inputs, filter_dropped, read_playlist_file
+from .inputs import dropped_inputs, expand_inputs, needs_scan, read_playlist_file
 from .logs import current_log_dir
 from .m3u import load_playlist as load_m3u_playlist
 from .m3u import save_playlist as save_m3u_playlist
@@ -213,7 +214,8 @@ class MainWindow(QMainWindow):
         self._buffer_fill = 0.0
         self._folder_scan_thread = None
         self._folder_scan_worker = None
-        self._folder_scan_folder = ""
+        self._input_scan_done = None  # on_done(encontrados, cancelado) del escaneo en curso
+        self._input_scan_queue = []   # (entradas, on_done, estado) esperando su turno
         self._folder_scan_entries = []
 
         # Vista previa en miniatura al pasar el mouse por la barra de
@@ -1206,16 +1208,26 @@ class MainWindow(QMainWindow):
         PlaylistController.add."""
         self.playlist.add(paths)
 
-    def open_paths(self, paths, play: bool = True) -> int:
+    def open_paths(self, paths, play: bool = True, announce: bool = False):
         """Agrega lo que el usuario "abrio" (carpetas y .m3u expandidos) y,
         con play=True o si no suena nada, reproduce lo primero agregado.
-        Devuelve cuantas entradas se agregaron."""
-        entries = expand_inputs(paths)
-        if not entries:
-            return 0
-        start_index = self.playlist.add(entries)
-        if play or self.current_index == -1:
-            self.play_index(start_index)
+        Devuelve cuantas entradas se agregaron, o None si hay carpetas: esas
+        se recorren en segundo plano y se agregan al terminar (announce=True
+        avisa en la barra de estado cuantas fueron)."""
+        if needs_scan(paths):
+            self._start_input_scan(paths, partial(self._finish_open_paths, play, announce), "Escaneando carpeta…")
+            return None
+        return self._finish_open_paths(play, announce, expand_inputs(paths), False)
+
+    def _finish_open_paths(self, play: bool, announce: bool, entries: list, cancelled: bool) -> int:
+        if entries:
+            start_index = self.playlist.add(entries)
+            if play or self.current_index == -1:
+                self.play_index(start_index)
+        if announce and entries:
+            noun = "elemento agregado" if len(entries) == 1 else "elementos agregados"
+            prefix = "Escaneo cancelado: " if cancelled else ""
+            self.statusBar().showMessage(f"{prefix}{len(entries)} {noun} a la lista", 4000)
         return len(entries)
 
     def _add_and_maybe_play(self, entries):
@@ -1228,10 +1240,7 @@ class MainWindow(QMainWindow):
 
     def handle_instance_message(self, action: str, paths):
         """Mensaje de otra instancia (ver single_instance.py)."""
-        added = self.open_paths(paths, play=action == "open")
-        if action == "enqueue" and added:
-            noun = "elemento agregado" if added == 1 else "elementos agregados"
-            self.statusBar().showMessage(f"{added} {noun} a la lista", 4000)
+        self.open_paths(paths, play=action == "open", announce=action == "enqueue")
         if self.isMinimized():
             self.showNormal()
         self.raise_()
@@ -1281,17 +1290,27 @@ class MainWindow(QMainWindow):
 
     def _start_folder_scan(self, folder: str):
         self.cancel_folder_scan()
+        self._start_input_scan([folder], partial(self._finish_folder_scan, folder), f"Escaneando carpeta: {folder}")
+
+    def _start_input_scan(self, paths, on_done, status: str):
+        """Expande `paths` (con carpetas) en un QThread y llama a
+        on_done(encontrados, cancelado) en el hilo de la UI. Con otro escaneo
+        en curso, este espera su turno (soltar dos carpetas seguidas no pierde
+        la segunda)."""
+        if self._folder_scan_thread is not None:
+            self._input_scan_queue.append((list(paths), on_done, status))
+            return
+        self._input_scan_done = on_done
         self._folder_scan_entries = []
         self.act_cancel_folder_scan.setEnabled(True)
-        self.statusBar().showMessage(f"Escaneando carpeta: {folder}")
+        self.statusBar().showMessage(status)
         thread = QThread(self)
-        worker = FolderScanWorker(folder)
+        worker = FolderScanWorker(paths)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         # Solo metodos de la ventana como slots: PySide entrega una senal a un
         # lambda en el hilo que la emite (el del escaneo), y estos tocan la UI.
         # Un metodo de un QObject se encola al hilo de la ventana.
-        self._folder_scan_folder = folder
         worker.batchFound.connect(self._on_folder_scan_batch)
         worker.finished.connect(self._on_folder_scan_finished)
         worker.cancelled.connect(self._on_folder_scan_cancelled)
@@ -1312,14 +1331,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Escaneando carpeta… {len(self._folder_scan_entries)} {noun} encontrados")
 
     def _on_folder_scan_finished(self, found: list):
-        self._finish_folder_scan(self._folder_scan_folder, found, cancelled=False)
+        self._complete_input_scan(found, cancelled=False)
 
     def _on_folder_scan_cancelled(self, found: list):
-        self._finish_folder_scan(self._folder_scan_folder, found, cancelled=True)
+        self._complete_input_scan(found, cancelled=True)
 
-    def _finish_folder_scan(self, folder: str, found: list, cancelled: bool):
+    def _complete_input_scan(self, found: list, cancelled: bool):
         self._folder_scan_entries = list(found)
         self.act_cancel_folder_scan.setEnabled(False)
+        done, self._input_scan_done = self._input_scan_done, None
+        if done is not None:
+            done(list(found), cancelled)
+
+    def _finish_folder_scan(self, folder: str, found: list, cancelled: bool):
         if not found:
             text = "Escaneo cancelado: no se encontraron archivos multimedia soportados." if cancelled else (
                 "No se encontraron archivos multimedia soportados."
@@ -1333,11 +1357,14 @@ class MainWindow(QMainWindow):
 
     def _on_folder_scan_failed(self, error: str):
         self.act_cancel_folder_scan.setEnabled(False)
+        self._input_scan_done = None
         QMessageBox.warning(self, "Abrir carpeta", f"No se pudo escanear la carpeta:\n{error}")
 
     def _clear_folder_scan_worker(self):
         self._folder_scan_thread = None
         self._folder_scan_worker = None
+        if self._input_scan_queue:
+            self._start_input_scan(*self._input_scan_queue.pop(0))
 
     def cancel_folder_scan(self):
         if self._folder_scan_worker is not None:
@@ -2439,8 +2466,19 @@ class MainWindow(QMainWindow):
         dropped = []
         for url in event.mimeData().urls():
             dropped.append(url.toLocalFile() if url.isLocalFile() else url.toString())
-        self._add_and_maybe_play(filter_dropped([d for d in dropped if d]))
+        inputs = dropped_inputs([d for d in dropped if d])
+        if needs_scan(inputs):
+            self._start_input_scan(inputs, self._finish_drop, "Escaneando lo soltado…")
+        else:
+            self._add_and_maybe_play(expand_inputs(inputs))
         event.acceptProposedAction()
+
+    def _finish_drop(self, found: list, cancelled: bool):
+        self._add_and_maybe_play(found)
+        if found:
+            noun = "elemento agregado" if len(found) == 1 else "elementos agregados"
+            prefix = "Escaneo cancelado: " if cancelled else ""
+            self.statusBar().showMessage(f"{prefix}{len(found)} {noun}", 5000)
 
     # ------------------------------------------------------------ misc
     def show_about(self):
