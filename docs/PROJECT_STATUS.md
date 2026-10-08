@@ -115,9 +115,21 @@ Actions; la última, del 2026-10-03, pasó). Ver
 Al subir una etiqueta `v<version>` (igual a `player.__version__`, hoy
 `0.2.0`), `.github/workflows/release.yml` corre el CI completo y luego
 construye la carpeta onedir, el `.zip`, el instalador y `SHA256SUMS.txt`, y
-los publica como GitHub Release. `v0.2.0` (2026-10-06) es el primer Release
-hecho por este workflow; el `v0.1.0` (2026-09-19) es anterior y trae el
-antiguo `.exe` de un solo archivo.
+los publica como GitHub Release. Ese workflow todavía no corrió: el único
+Release es `v0.1.0` (2026-09-19), anterior, con el antiguo `.exe` de un solo
+archivo, y `v0.2.0` se etiqueta cuando GitHub Actions vuelva a poder subir
+artifacts (el almacenamiento gratis del mes se agotó el 2026-10-07 y se
+renueva el 1 de noviembre).
+
+**Firma de código:** `python packaging/sign_and_package.py` (después de
+PyInstaller, con `CODESIGN_THUMBPRINT` = huella SHA-1 de un certificado de
+firma del almacén de Windows) firma el `.exe` con signtool y compila el
+instalador pasándole a Inno Setup la herramienta "codesign", así quedan
+firmados también el instalador y su desinstalador (sello de tiempo de
+`CODESIGN_TIMESTAMP_URL`, por defecto DigiCert). Verificado el 2026-10-07
+con un certificado autofirmado de prueba (build real: `.exe`, desinstalador
+e instalador firmados y sellados); hasta usar un certificado de confianza,
+SmartScreen sigue avisando. El CI no firma.
 
 No empaqueta VLC por defecto: la máquina que ejecute el `.exe` necesita VLC
 3.0 de 64 bits instalado aparte (`BUNDLE_VLC=1` lo incluye recortado, con
@@ -391,7 +403,8 @@ python -m pip install -r requirements-dev.txt
 $env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-**2026-10-03, Windows 11, Python 3.14, libVLC 3.0.23: 319 passed** (≈56 s).
+**2026-10-07, Windows 11, Python 3.14, libVLC 3.0.23: 324 passed** (≈60 s;
+319 el 2026-10-03).
 En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
 con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
 `windows-latest` (Python 3.12 y 3.14, VLC instalado con `choco`); la última

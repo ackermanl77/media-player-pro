@@ -121,6 +121,26 @@ predeterminadas, sin adueñarse de ninguna extensión), con un verbo extra
 también `licenses/` a `{app}\licenses`, y al desinstalar borra sus claves
 del registro (incluida la clave padre de `Capabilities` si quedó vacía).
 
+## Firma de código
+
+`packaging/sign_and_package.py` reemplaza el `iscc` del build manual cuando
+se quiere firmar:
+
+```bat
+set CODESIGN_THUMBPRINT=<huella SHA-1 del certificado>
+pyinstaller --noconfirm ReproductorMultimediaPro.spec
+python packaging/sign_and_package.py          # --no-installer: solo el .exe
+```
+
+Firma `dist/ReproductorMultimediaPro/ReproductorMultimediaPro.exe` con
+signtool (Windows SDK: `PATH` o el `Windows Kits\10\bin` más nuevo), SHA-256
+y sello RFC 3161 de `CODESIGN_TIMESTAMP_URL` (por defecto DigiCert), y
+compila el instalador con `/DSign` y la herramienta "codesign": el
+`#ifdef Sign` del `.iss` activa `SignTool=codesign` y `SignedUninstaller=yes`,
+así Inno firma el instalador y el desinstalador. La versión sale de
+`player/__init__.py`. Probado el 2026-10-07 con un certificado autofirmado
+(`tests/test_sign_script.py` cubre los comandos).
+
 ## Verificar
 
 No hay una suite automatizada contra el paquete en sí. Después de cada
