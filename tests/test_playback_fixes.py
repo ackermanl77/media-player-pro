@@ -352,3 +352,17 @@ def test_audio_and_subtitle_delays_are_remembered_per_file(window, headless):
     assert _pump_until(window, lambda: window.player.get_audio_delay_ms() == 150)
     assert window.player.get_subtitle_delay_ms() == -250
     assert resume.get_saved_delays(first) == (150, -250)
+
+
+def test_position_markers_are_rebuilt_only_when_invalidated(window, monkeypatch):
+    _fake_track(window, monkeypatch, now_ms=10_000, marks=(5_000,))
+    builds = []
+    original = window._position_markers
+    monkeypatch.setattr(window, "_position_markers", lambda length: builds.append(length) or original(length))
+    for _ in range(10):
+        window.update_ui()
+    assert len(builds) == 1
+    window._apply_ab_loop(1_000, 2_000)  # a change invalidates them once
+    for _ in range(5):
+        window.update_ui()
+    assert len(builds) == 2
