@@ -142,6 +142,17 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Restos P3 del informe (2026-10-07).** Bucle A-B: `Alt+Shift+←/→` y `Ctrl+Shift+←/→` mueven A y B
+  de a 0,1 s (sin cruzarse ni salir del archivo) y "Bucle entre marcadores" repite el tramo entre los
+  marcadores que rodean la posición (3.9). El ecualizador pasa a "Personalizado" al mover una banda
+  o el preamp a mano (3.10). Los desfases de audio y subtítulos se recuerdan por archivo en
+  `positions.json` y se aplican al empezar a reproducir (3.13). Los mensajes del OSD también van a la
+  barra de estado y, con Qt 6.8+, como aviso accesible para lectores de pantalla (4.8). Las carpetas
+  soltadas, pasadas por línea de comandos o reenviadas por otra instancia se recorren en el mismo
+  `QThread` que "Abrir carpeta" (`expand_inputs_batches()`), en cola si ya hay un escaneo (5.5). Una
+  prueba fija que los marcadores de la barra solo se reconstruyen al invalidarse (5.4). Firma de código
+  con `packaging/sign_and_package.py` (ver Release).
+
 - **Tanda P3 del informe (2026-10-03).** "Abrir carpeta" se recorre en un
   `QThread` (`player/folder_scan.py`): lotes en el mismo orden natural que
   `scan_folder()`, progreso en la barra de estado y Archivo → "Cancelar
