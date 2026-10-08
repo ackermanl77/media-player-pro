@@ -403,7 +403,7 @@ python -m pip install -r requirements-dev.txt
 $env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-**2026-10-07, Windows 11, Python 3.14, libVLC 3.0.23: 324 passed** (≈60 s;
+**2026-10-07, Windows 11, Python 3.14, libVLC 3.0.23: 335 passed** (≈60 s; 324 before the P3 leftovers,
 319 el 2026-10-03).
 En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
 con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
