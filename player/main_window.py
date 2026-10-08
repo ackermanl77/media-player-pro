@@ -5,6 +5,7 @@ import sys
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QStandardPaths, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import (
+    QAccessible,
     QAction,
     QActionGroup,
     QDesktopServices,
@@ -36,6 +37,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:  # Qt 6.8+: avisos para lectores de pantalla (requirements admite 6.6)
+    from PySide6.QtGui import QAccessibleAnnouncementEvent
+except ImportError:  # pragma: no cover - depende de la version de Qt
+    QAccessibleAnnouncementEvent = None
 
 from . import __version__, theme
 from .actions import ActionRegistry
@@ -109,6 +115,7 @@ SESSION_SAVE_DELAY_MS = 1000
 UI_TICK_MS = 500          # etiquetas y barra; las transiciones llegan por eventos
 AB_LOOP_TICK_MS = 50      # mientras hay un tramo A-B activo
 AB_NUDGE_MS = 100         # paso para mover los puntos A/B
+OSD_TIMEOUT_MS = 1500
 STREAM_STALL_TIMEOUT_MS = 15_000
 STREAM_VISUALIZER_DELAY_MS = 1500
 REPEAT_LABELS = {"none": "No repetir", "all": "Repetir todo", "one": "Repetir uno"}
@@ -220,7 +227,7 @@ class MainWindow(QMainWindow):
         # OSD (on-screen display) transitoria sobre el video -- ver _show_osd.
         self._osd_timer = QTimer(self)
         self._osd_timer.setSingleShot(True)
-        self._osd_timer.setInterval(1500)
+        self._osd_timer.setInterval(OSD_TIMEOUT_MS)
 
         # Guardado de la playlist con debounce (ver _schedule_session_save).
         self._session_save_timer = QTimer(self)
@@ -1972,6 +1979,20 @@ class MainWindow(QMainWindow):
         self._reposition_overlays()
         if self._overlays_allowed():
             self._osd_overlay.show()
+        # El OSD es una ventana superpuesta que los lectores de pantalla no
+        # leen: el mismo texto va a la barra de estado (si no tiene ya un
+        # mensaje, que suele ser la version mas detallada) y como aviso
+        # accesible.
+        if not self.statusBar().currentMessage():
+            self.statusBar().showMessage(text, OSD_TIMEOUT_MS)
+        self._announce(text)
+
+    def _announce(self, text: str):
+        """Aviso "polite" para lectores de pantalla (Qt 6.8+); no hace nada
+        sin tecnologia de asistencia activa."""
+        if QAccessibleAnnouncementEvent is None or not QAccessible.isActive():
+            return
+        QAccessible.updateAccessibility(QAccessibleAnnouncementEvent(self, text))
 
     def _hide_osd(self):
         self._osd_label.hide()

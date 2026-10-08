@@ -105,6 +105,10 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   estado se oculta (sus mensajes aparecen en el OSD), un controlador propio
   (título, tiempos, barra grande y los botones principales) y el OSD se ven
   encima del video, y el cursor se oculta tras ~2,5 s sin mover el mouse.
+- **Lectores de pantalla**: los mensajes del OSD (que es una ventana
+  superpuesta que no leen) también van a la barra de estado y se envían como
+  aviso accesible (Qt 6.8+), así NVDA/Narrador anuncian volumen, saltos,
+  sincronía, A-B, etc.
 - Vista previa en miniatura al pasar el mouse por la barra (solo videos
   locales; en audio y streams muestra solo el tiempo), con caché.
 - **Recuerda los ajustes y la lista entre sesiones**: volumen, silencio,

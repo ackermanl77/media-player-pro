@@ -196,6 +196,27 @@ def test_show_osd_displays_text_and_hides_after_the_timer_fires(qapp):
         window.close()
 
 
+def test_the_osd_text_reaches_the_status_bar_and_screen_readers(qapp, monkeypatch):
+    from player import main_window as mw
+
+    window = MainWindow()
+    announced = []
+    monkeypatch.setattr(mw.QAccessible, "isActive", staticmethod(lambda: True))
+    monkeypatch.setattr(mw.QAccessible, "updateAccessibility", staticmethod(lambda event: announced.append(event.message())))
+    try:
+        window.statusBar().clearMessage()
+        window._show_osd("Volumen: 40%")
+        assert window.statusBar().currentMessage() == "Volumen: 40%"
+        assert announced == ["Volumen: 40%"]
+        # A more detailed message already in the status bar is kept.
+        window.statusBar().showMessage("Sincronía de subtítulos: +50 ms")
+        window._show_osd("Subtítulos: +50 ms")
+        assert window.statusBar().currentMessage() == "Sincronía de subtítulos: +50 ms"
+        assert announced[-1] == "Subtítulos: +50 ms"
+    finally:
+        window.close()
+
+
 def test_seek_relative_shows_signed_seconds_on_the_osd(qapp):
     window = MainWindow()
     try:
