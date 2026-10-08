@@ -19,6 +19,16 @@ También con atajos (y entradas propias en el menú Reproducción):
 `Ctrl+Shift+A` marca (o vuelve a marcar) el punto A, `Ctrl+Shift+B` el
 punto B y `Ctrl+Shift+L` limpia el bucle.
 
+**Ajuste fino:** `Alt+Shift+Izquierda/Derecha` mueve el punto A 0,1 s
+antes/después y `Ctrl+Shift+Izquierda/Derecha` el punto B (también en el
+menú Reproducción). Los puntos no se cruzan (quedan al menos 0,1 s
+separados) ni salen del archivo; cada paso se anuncia en el OSD.
+
+**Bucle entre marcadores:** Reproducción → "Bucle entre marcadores" pone
+A en el marcador nombrado anterior a la posición actual y B en el
+siguiente (sin marcador antes, el inicio; sin marcador después, el final
+del archivo) y activa el bucle.
+
 Si se intenta marcar B en un punto anterior o igual a A, se ignora y
 aparece un aviso en la barra de estado.
 
@@ -47,6 +57,10 @@ se recalculan cuando cambian (pista, bucle, marcadores, capítulos)
 [docs/workflows/bookmarks/workflow.md](../bookmarks/workflow.md)).
 
 ## Validación
+
+`tests/test_playback_fixes.py::test_ab_points_nudge_without_crossing` y
+`::test_loop_between_bookmarks_uses_the_surrounding_marks` cubren el ajuste
+fino y el bucle entre marcadores.
 
 Verificado en vivo contra un video real de 12s: marcar A en ~0.4s y B en
 ~1.4s, forzar el tiempo por encima de B, y confirmar que `update_ui()`

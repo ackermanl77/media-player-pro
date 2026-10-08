@@ -131,7 +131,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - **Repetición A-B**: marca un punto A y un punto B para poner en bucle
   solo ese tramo — con el botón A-B (cicla A → B → desactivar), el menú
   Reproducción o los atajos `Ctrl+Shift+A` (punto A), `Ctrl+Shift+B`
-  (punto B) y `Ctrl+Shift+L` (limpiar).
+  (punto B) y `Ctrl+Shift+L` (limpiar); `Alt+Shift+←/→` y
+  `Ctrl+Shift+←/→` mueven A y B de a 0,1 s, y "Bucle entre marcadores"
+  repite el tramo entre los marcadores que rodean la posición.
 - **Sincronía de subtítulos** ajustable en vivo (±50 ms, tecla `G`/`H`) y
   **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande).
 - **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo

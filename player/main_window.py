@@ -100,6 +100,7 @@ DEFAULT_WINDOW_SIZE = (1150, 720)
 SESSION_SAVE_DELAY_MS = 1000
 UI_TICK_MS = 500          # etiquetas y barra; las transiciones llegan por eventos
 AB_LOOP_TICK_MS = 50      # mientras hay un tramo A-B activo
+AB_NUDGE_MS = 100         # paso para mover los puntos A/B
 STREAM_STALL_TIMEOUT_MS = 15_000
 STREAM_VISUALIZER_DELAY_MS = 1500
 REPEAT_LABELS = {"none": "No repetir", "all": "Repetir todo", "one": "Repetir uno"}
@@ -449,6 +450,13 @@ class MainWindow(QMainWindow):
         self.act_ab_set_a = A("ab_set_a", "Marcar punto A", self._set_ab_point_a, "Ctrl+Shift+A")
         self.act_ab_set_b = A("ab_set_b", "Marcar punto B", self._set_ab_point_b, "Ctrl+Shift+B")
         self.act_ab_clear = A("ab_clear", "Limpiar bucle A-B", self._clear_ab_loop_with_feedback, "Ctrl+Shift+L")
+        A("ab_a_earlier", "Mover punto A 0,1 s antes", lambda: self._nudge_ab_point("a", -AB_NUDGE_MS), "Alt+Shift+Left")
+        A("ab_a_later", "Mover punto A 0,1 s después", lambda: self._nudge_ab_point("a", AB_NUDGE_MS), "Alt+Shift+Right")
+        A("ab_b_earlier", "Mover punto B 0,1 s antes", lambda: self._nudge_ab_point("b", -AB_NUDGE_MS), "Ctrl+Shift+Left")
+        A("ab_b_later", "Mover punto B 0,1 s después", lambda: self._nudge_ab_point("b", AB_NUDGE_MS), "Ctrl+Shift+Right")
+        A("ab_bookmarks", "Bucle entre marcadores", self._loop_between_bookmarks,
+          tooltip="Repite el tramo entre el marcador anterior y el siguiente a la posición actual "
+                  "(o el inicio/final del archivo si no hay)")
 
         # Archivo.
         A("open_files", "Abrir archivos...", self.open_files, QKeySequence.StandardKey.Open)
@@ -798,7 +806,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _checked, m=mode: self._set_repeat_mode(m))
             self.repeat_group.addAction(action)
             self.menu_repeat.addAction(action)
-        R.populate(menu_playback, ["ab_loop", "ab_set_a", "ab_set_b", "ab_clear"])
+        R.populate(menu_playback, ["ab_loop", "ab_set_a", "ab_set_b", "ab_clear", "ab_a_earlier", "ab_a_later",
+                                  "ab_b_earlier", "ab_b_later", "ab_bookmarks"])
 
         self.menu_chapters = menu_playback.addMenu("Capítulos")
         self.menu_chapters.aboutToShow.connect(self._populate_chapters_menu)
@@ -1690,14 +1699,56 @@ class MainWindow(QMainWindow):
         if candidate_b <= self.loop_point_a:
             self.statusBar().showMessage("El punto B debe ser posterior al punto A", 3000)
             return
-        self.loop_point_b = candidate_b
-        text = f"A-B: {format_time(self.loop_point_a)}-{format_time(self.loop_point_b)}"
+        self._apply_ab_loop(self.loop_point_a, candidate_b)
+
+    def _apply_ab_loop(self, a_ms: int, b_ms: int):
+        """Activa el tramo A-B [a_ms, b_ms] (b_ms > a_ms) y lo anuncia."""
+        self.loop_point_a, self.loop_point_b = a_ms, b_ms
+        text = f"A-B: {format_time(a_ms)}-{format_time(b_ms)}"
         self.act_ab_loop.setToolTip(f"{text} — clic para desactivar")
         self.act_ab_loop.setCheckable(True)
         self.act_ab_loop.setChecked(True)
         self._ab_timer.start()
         self._invalidate_position_markers()
         self._show_osd(text)
+
+    def _nudge_ab_point(self, which: str, delta_ms: int):
+        """Mueve el punto A o B delta_ms, sin cruzarlos (quedan al menos
+        AB_NUDGE_MS separados) ni salir del archivo."""
+        if self.current_index == -1:
+            return
+        a, b = self.loop_point_a, self.loop_point_b
+        length = self.player.get_length_ms()
+        if which == "a" and a is not None:
+            upper = b - AB_NUDGE_MS if b is not None else (length if length > 0 else a + delta_ms)
+            new_a = max(0, min(a + delta_ms, upper))
+            if b is None:
+                self.loop_point_a = new_a
+                self.act_ab_loop.setToolTip(f"A: {format_time(new_a)} — clic para marcar B")
+                self._invalidate_position_markers()
+                self._show_osd(f"Punto A: {format_time(new_a)}")
+            else:
+                self._apply_ab_loop(new_a, b)
+        elif which == "b" and a is not None and b is not None:
+            new_b = max(a + AB_NUDGE_MS, b + delta_ms)
+            if length > 0:
+                new_b = min(new_b, length)
+            self._apply_ab_loop(a, new_b)
+
+    def _loop_between_bookmarks(self):
+        """Tramo A-B entre el marcador anterior y el siguiente a la posicion
+        actual; sin marcador a un lado, el inicio o el final del archivo."""
+        if self.current_index == -1:
+            return
+        now = self.player.get_time_ms()
+        length = self.player.get_length_ms()
+        marks = sorted(b["position_ms"] for b in self._current_bookmarks())
+        a = max((m for m in marks if m <= now), default=0)
+        b = min((m for m in marks if m > now), default=length if length > 0 else None)
+        if b is None or b - a < AB_NUDGE_MS:
+            self.statusBar().showMessage("No hay un tramo entre marcadores en esta posición", 3000)
+            return
+        self._apply_ab_loop(a, b)
 
     def _clear_ab_loop_with_feedback(self):
         if self.loop_point_a is None and self.loop_point_b is None:

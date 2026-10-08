@@ -291,3 +291,44 @@ def test_reload_preserving_state_keeps_position_pause_delay_and_external_subs(mo
 def test_reload_preserving_state_is_a_no_op_when_stopped(monkeypatch):
     player = _headless_player(monkeypatch)
     assert player.reload_preserving_state() is False
+
+
+# -------------------------------------- A-B: ajuste fino y entre marcadores
+def _fake_track(window, monkeypatch, now_ms, length_ms=60_000, marks=()):
+    window.add_files_to_playlist(["C:/fake/video.mkv"])
+    window.current_index = 0
+    monkeypatch.setattr(window.player, "get_time_ms", lambda: now_ms)
+    monkeypatch.setattr(window.player, "get_length_ms", lambda: length_ms)
+    monkeypatch.setattr(main_window_module, "get_bookmarks",
+                        lambda _p: [{"name": f"m{i}", "position_ms": m} for i, m in enumerate(marks)])
+    window._invalidate_bookmarks_cache()
+
+
+def test_ab_points_nudge_without_crossing(window, monkeypatch):
+    _fake_track(window, monkeypatch, now_ms=10_000)
+    window._set_ab_point_a()
+    window._nudge_ab_point("a", -100)
+    assert window.loop_point_a == 9_900 and window.loop_point_b is None
+    window._apply_ab_loop(9_900, 10_100)
+    window._nudge_ab_point("a", 100)   # would leave A 100 ms before B: allowed
+    window._nudge_ab_point("a", 100)   # would cross B: stays put
+    assert window.loop_point_a == 10_000
+    window._nudge_ab_point("b", -100)  # B can't come closer than 100 ms
+    assert window.loop_point_b == 10_100
+    window._nudge_ab_point("b", 100)
+    assert (window.loop_point_a, window.loop_point_b) == (10_000, 10_200)
+    window._apply_ab_loop(50, 59_950)
+    window._nudge_ab_point("a", -100)
+    window._nudge_ab_point("b", 100)
+    assert (window.loop_point_a, window.loop_point_b) == (0, 60_000)  # clamped to the file
+
+
+def test_loop_between_bookmarks_uses_the_surrounding_marks(window, monkeypatch):
+    _fake_track(window, monkeypatch, now_ms=25_000, marks=(40_000, 5_000, 20_000))
+    window._loop_between_bookmarks()
+    assert (window.loop_point_a, window.loop_point_b) == (20_000, 40_000)
+    assert window._ab_timer.isActive()
+    window._clear_ab_loop()
+    _fake_track(window, monkeypatch, now_ms=45_000, marks=(40_000,))
+    window._loop_between_bookmarks()   # no mark after: up to the end
+    assert (window.loop_point_a, window.loop_point_b) == (40_000, 60_000)
