@@ -133,6 +133,26 @@ def test_choosing_a_preset_in_the_dialog_updates_sliders(qapp, player):
         dialog.close()
 
 
+def test_a_manual_edit_switches_the_preset_to_personalizado(qapp, player):
+    dialog = EqualizerDialog(player)
+    try:
+        dialog.enable_checkbox.setChecked(True)
+        dialog.preset_combo.setCurrentIndex(dialog.preset_combo.findData(13))  # "Rock"
+        rock = player.get_equalizer_values()
+        assert dialog.preset_combo.currentData() == 13  # applying a preset keeps it selected
+        dialog.band_spins[2].setValue(dialog.band_spins[2].value() + 1.0)
+        assert dialog.preset_combo.currentData() == -1
+        assert dialog.state().preset == -1
+        # Switching to "Personalizado" reapplies nothing: only the edited band changed.
+        values = player.get_equalizer_values()
+        assert values[1][2] == pytest.approx(rock[1][2] + 1.0, abs=0.06)
+        assert [v for i, v in enumerate(values[1]) if i != 2] == pytest.approx([v for i, v in enumerate(rock[1]) if i != 2])
+        dialog.preamp_slider.setValue(dialog.preamp_slider.value() - 5)
+        assert dialog.preset_combo.currentData() == -1
+    finally:
+        dialog.close()
+
+
 def test_dialog_built_later_shows_the_restored_equalizer(qapp, player):
     player.set_equalizer_values(6.0, [1.0] * 10)
     dialog = EqualizerDialog(player, initial=EqualizerSettings(enabled=True, preset=5, preamp=6.0, bands=[1.0] * 10))

@@ -211,6 +211,7 @@ class EqualizerDialog(QDialog):
         self.preamp_spin.blockSignals(True)
         self.preamp_spin.setValue(db)
         self.preamp_spin.blockSignals(False)
+        self._mark_custom()
         if self.enable_checkbox.isChecked():
             self.player.set_equalizer_preamp(db)
 
@@ -220,8 +221,20 @@ class EqualizerDialog(QDialog):
         self.band_spins[idx].blockSignals(True)
         self.band_spins[idx].setValue(db)
         self.band_spins[idx].blockSignals(False)
+        self._mark_custom()
         if self.enable_checkbox.isChecked():
             self.player.set_equalizer_band(idx, db)
+
+    def _mark_custom(self):
+        """Un cambio a mano (slider o spin box) ya no es el preset elegido:
+        el combo pasa a "Personalizado" sin reaplicar nada (los presets
+        actualizan los controles con las senales bloqueadas, asi que esto
+        solo corre en ediciones del usuario)."""
+        custom = self.preset_combo.findData(-1)
+        if self.preset_combo.currentIndex() != custom:
+            self.preset_combo.blockSignals(True)
+            self.preset_combo.setCurrentIndex(custom)
+            self.preset_combo.blockSignals(False)
 
     def on_preamp_spin_changed(self, value: float):
         self.preamp_slider.setValue(self._db_to_slider(value))

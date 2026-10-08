@@ -18,8 +18,9 @@ abierto mientras se sigue usando el reproductor).
    banda tiene un slider, un campo numérico debajo (escribir un valor o
    usar sus flechas mueve el slider) y una etiqueta arriba (`+6,0 dB`,
    `-3,5 dB`, ...) que se actualiza en vivo mientras se arrastra, o al
-   aplicar un preset. Mover una banda después de elegir un preset no
-   cambia el combo a "Personalizado" (sigue mostrando el preset).
+   aplicar un preset. Mover una banda o el preamp a mano después de elegir
+   un preset cambia el combo a "Personalizado" (sin reaplicar nada: los
+   valores quedan como están), y así se guarda entre sesiones.
 
 El diálogo es un singleton por ventana (`MainWindow.equalizer_dialog`):
 abrirlo dos veces reusa la misma instancia en vez de crear una nueva, así
