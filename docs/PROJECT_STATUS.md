@@ -142,6 +142,27 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Funciones de VLC que faltaban (informe 4.10, 2026-10-11).** Audio → Dispositivo de salida (lista de
+  libVLC, se recuerda; uno desconectado se muestra como tal) y Normalizar volumen (normvol). Video →
+  Relación de aspecto y Recortar (teclas `A`/`C` las recorren, con OSD), Desentrelazado (se recuerda;
+  volver a "Automático" recrea el reproductor, porque libVLC 3 no tiene API para pedirlo de nuevo),
+  Ajustes de video (`Ctrl+E`, filtro adjust en vivo, se recuerdan) e Información del medio (`Ctrl+I`).
+  Todo ese estado del MediaPlayer se reaplica al recrearlo, como el zoom. Dos cosas de libVLC 3.0.23
+  medidas al hacerlo, resueltas en `player/vlc_internals.py` (ctypes): `MediaTrack` de python-vlc
+  declara audio/video/subtitle como campos seguidos en vez de una union y leer el bitrate de una pista
+  cuelga el proceso; y `--audio-filter` en la Instance se ignora (el reproductor crea su variable sin
+  heredar) y `set_equalizer` la pisa con "equalizer". El normalizador fija la cadena con
+  `var_SetChecked` de libvlccore en el reproductor y en su salida de audio ya creada (como hace libVLC
+  con el ecualizador): medido con la salida capturada, baja una senoide fuerte a menos de un tercio,
+  en vivo, y sigue activo despues de mover el ecualizador. Si esos simbolos faltan, la opcion queda
+  desactivada con el motivo.
+- **Autodiagnostico del .exe (informe 8.5).** `ReproductorMultimediaPro.exe --self-test
+  [--self-test-output=ARCHIVO]` (`player/self_test.py`) comprueba version, Qt, la traduccion, libVLC
+  reproduciendo un WAV generado (y leyendo sus pistas) y la ventana principal en offscreen, sin tocar
+  los ajustes del usuario; codigo 0 si todo paso. `release.yml` instala VLC con choco y lo corre sobre
+  el `.exe` construido antes de comprimir. Verificado con un build local (2026-10-11): las seis
+  comprobaciones pasan.
+
 - **Restos P3 del informe (2026-10-07).** Bucle A-B: `Alt+Shift+←/→` y `Ctrl+Shift+←/→` mueven A y B
   de a 0,1 s (sin cruzarse ni salir del archivo) y "Bucle entre marcadores" repite el tramo entre los
   marcadores que rodean la posición (3.9). El ecualizador pasa a "Personalizado" al mover una banda
@@ -414,8 +435,8 @@ python -m pip install -r requirements-dev.txt
 $env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-**2026-10-07, Windows 11, Python 3.14, libVLC 3.0.23: 335 passed** (≈60 s; 324 before the P3 leftovers,
-319 el 2026-10-03).
+**2026-10-11, Windows 11, Python 3.14, libVLC 3.0.23: 344 passed** (≈65 s; 335 el 2026-10-07, 319 el
+2026-10-03).
 En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
 con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
 `windows-latest` (Python 3.12 y 3.14, VLC instalado con `choco`); la última

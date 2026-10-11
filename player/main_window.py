@@ -63,6 +63,7 @@ from .formats import (
 from .fullscreen import FullscreenMode
 from .inputs import dropped_inputs, expand_inputs, needs_scan, read_playlist_file
 from .logs import current_log_dir
+from .media_info_dialog import MediaInfoDialog
 from .m3u import load_playlist as load_m3u_playlist
 from .m3u import save_playlist as save_m3u_playlist
 from .playlist_controller import PlaylistController
@@ -97,6 +98,8 @@ from .settings import (
 )
 from .subtitle_dialog import OnlineSubtitleDialog, wait_for_subtitle_jobs
 from .url_dialog import OpenUrlDialog
+from .video_adjust_dialog import VideoAdjustDialog
+from .video_options import ASPECT_RATIOS, CROP_RATIOS, DEINTERLACE_LABELS, choice_label, next_choice
 from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist_owns_key reexportados
     MARKER_BOOKMARK,
     MARKER_CHAPTER,
@@ -194,6 +197,7 @@ class MainWindow(QMainWindow):
         self._bookmarks_cache = None
         self._chapters_cache = None  # (generacion, [(inicio, duracion, nombre)])
         self.equalizer_dialog = None
+        self.video_adjust_dialog = None
         self.bookmarks_dialog = None
         self.loop_point_a = None
         self.loop_point_b = None
@@ -333,6 +337,12 @@ class MainWindow(QMainWindow):
         eq = s.equalizer
         if eq.enabled:
             self.player.set_equalizer_values(eq.preamp, eq.bands)
+        self._set_deinterlace(s.deinterlace, announce=False)
+        self.player.set_video_adjust(s.video_adjust)
+        if s.audio_device:
+            self.player.set_audio_device(s.audio_device)
+        if s.normalize_volume and self.act_normalize_volume.isEnabled():
+            self.act_normalize_volume.setChecked(True)
         if s.geometry:
             self._restored_geometry = self.restoreGeometry(QByteArray.fromBase64(s.geometry.encode("ascii")))
         if s.window_state:
@@ -367,6 +377,10 @@ class MainWindow(QMainWindow):
         s.geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
         s.window_state = bytes(self.saveState().toBase64()).decode("ascii")
         s.last_open_dir = self.settings.last_open_dir
+        s.deinterlace = self.player.get_deinterlace()
+        s.video_adjust = self.player.get_video_adjust()
+        s.audio_device = self.player.get_audio_device()
+        s.normalize_volume = self.player.is_volume_normalized()
         return s
 
     def save_settings_now(self) -> bool:
@@ -516,6 +530,11 @@ class MainWindow(QMainWindow):
         A("audio_earlier", "Adelantar audio 50 ms", lambda: self._adjust_audio_delay(-AUDIO_DELAY_STEP_MS), "J")
         A("audio_later", "Retrasar audio 50 ms", lambda: self._adjust_audio_delay(AUDIO_DELAY_STEP_MS), "K")
         A("audio_sync_reset", "Restablecer sincronía de audio", lambda: self._set_audio_delay(0))
+        self.act_normalize_volume = A(
+            "normalize_volume", "Normalizar volumen", checkable=True,
+            tooltip="Baja automáticamente los pasajes muy fuertes (normalizador de VLC)",
+        )
+        self.act_normalize_volume.toggled.connect(self._on_normalize_toggled)
 
         # Video.
         A("snapshot", "Capturar fotograma...", self.take_snapshot)
@@ -526,6 +545,10 @@ class MainWindow(QMainWindow):
         A("subtitles_earlier", "Adelantar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(-50), "G")
         A("subtitles_later", "Retrasar subtítulos 50 ms", lambda: self._adjust_subtitle_delay(50), "H")
         A("subtitle_sync_reset", "Restablecer sincronía de subtítulos", lambda: self._set_subtitle_delay(0))
+        A("video_adjust", "Ajustes de video...", self.open_video_adjust, "Ctrl+E",
+          tooltip="Brillo, contraste, saturación, tono y gamma")
+        A("media_info", "Información del medio...", self.show_media_info, "Ctrl+I",
+          tooltip="Códecs, resolución, cuadros por segundo, canales, bitrate y etiquetas")
 
         # Ver.
         self.act_remaining_time = A("remaining_time", "Mostrar tiempo restante", lambda _c=False: self.update_ui(),
@@ -856,10 +879,16 @@ class MainWindow(QMainWindow):
         menu_audio = menubar.addMenu("A&udio")
         self.menu_audio_tracks = QMenu("Pista de audio", menu_audio)
         self.menu_audio_tracks.aboutToShow.connect(self._populate_audio_track_menu)
+        self.menu_audio_device = QMenu("Dispositivo de salida", menu_audio)
+        self.menu_audio_device.aboutToShow.connect(self._populate_audio_device_menu)
         R.populate(menu_audio, [
-            "mute", "equalizer", "visualizer", self.menu_audio_tracks, None,
-            "audio_earlier", "audio_later", "audio_sync_reset",
+            "mute", "equalizer", "visualizer", "normalize_volume", self.menu_audio_tracks, self.menu_audio_device,
+            None, "audio_earlier", "audio_later", "audio_sync_reset",
         ])
+        if not self.player.volume_normalization_supported():
+            self.act_normalize_volume.setEnabled(False)
+            self.act_normalize_volume.setToolTip(
+                f"No disponible con esta versión de VLC ({libvlc_version()})")
 
         # -- Video --
         menu_video = menubar.addMenu("&Video")
@@ -897,6 +926,13 @@ class MainWindow(QMainWindow):
             zoom_group.addAction(action)
             self.menu_zoom.addAction(action)
 
+        self.menu_aspect = self._choice_menu(
+            menu_video, "Relación de aspecto", ASPECT_RATIOS, "", self._set_aspect_ratio)
+        self.menu_crop = self._choice_menu(menu_video, "Recortar", CROP_RATIOS, "", self._set_crop)
+        self.menu_deinterlace = self._choice_menu(
+            menu_video, "Desentrelazado", DEINTERLACE_LABELS, "auto", self._set_deinterlace)
+        R.populate(menu_video, ["video_adjust", None, "media_info"])
+
         self.menu_gpu = None
         if sys.platform.startswith("win"):
             self._build_gpu_menu(menu_video)
@@ -925,8 +961,28 @@ class MainWindow(QMainWindow):
         self.video_context_menu = R.populate(QMenu(self), [
             "play_pause", "stop", "previous", "next", None, "fullscreen", None,
             self.menu_speed, self.menu_chapters, self.menu_audio_tracks, self.menu_subtitle_tracks,
-            self.menu_zoom, None, "always_on_top",
+            self.menu_zoom, self.menu_aspect, self.menu_crop, None, "media_info", "always_on_top",
         ])
+
+    def _choice_menu(self, parent_menu, title, choices, default, on_choose):
+        """Submenu de opciones exclusivas: choices = [(etiqueta, valor)]."""
+        menu = parent_menu.addMenu(title)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for label, value in choices:
+            action = QAction(label, menu, checkable=True)
+            action.setData(value)
+            action.setChecked(value == default)
+            action.triggered.connect(lambda _checked, v=value: on_choose(v))
+            group.addAction(action)
+            menu.addAction(action)
+        return menu
+
+    @staticmethod
+    def _check_menu_value(menu, value):
+        for action in menu.actions():
+            if action.isCheckable():
+                action.setChecked(action.data() == value)
 
     def _build_gpu_menu(self, menu_video):
         self.menu_gpu = menu_video.addMenu("Mejora por GPU")
@@ -968,6 +1024,9 @@ class MainWindow(QMainWindow):
         S("Alt+Left", "Retroceder 30 s", lambda: self._seek_relative(-30_000))
         S("Ctrl+Alt+Right", "Adelantar 60 s", lambda: self._seek_relative(60_000))
         S("Ctrl+Alt+Left", "Retroceder 60 s", lambda: self._seek_relative(-60_000))
+        S("A", "Siguiente relación de aspecto", lambda: self._cycle_choice(ASPECT_RATIOS, self._set_aspect_ratio,
+                                                                          self.player.get_aspect_ratio()))
+        S("C", "Siguiente recorte", lambda: self._cycle_choice(CROP_RATIOS, self._set_crop, self.player.get_crop()))
         S(Qt.Key.Key_Up, "Subir volumen", lambda: self._nudge_volume(5))
         S(Qt.Key.Key_Down, "Bajar volumen", lambda: self._nudge_volume(-5))
         # Teclas multimedia del teclado (Windows las manda como WM_APPCOMMAND
@@ -2400,6 +2459,69 @@ class MainWindow(QMainWindow):
         self.equalizer_dialog.show()
         self.equalizer_dialog.raise_()
         self.equalizer_dialog.activateWindow()
+
+    # ------------------------------------------------------------ imagen y sonido
+    def open_video_adjust(self):
+        if self.video_adjust_dialog is None:
+            self.video_adjust_dialog = VideoAdjustDialog(self.player, self)
+        self.video_adjust_dialog.show()
+        self.video_adjust_dialog.raise_()
+        self.video_adjust_dialog.activateWindow()
+
+    def _set_aspect_ratio(self, ratio: str):
+        self.player.set_aspect_ratio(ratio)
+        self._check_menu_value(self.menu_aspect, ratio)
+        self._show_osd(f"Aspecto: {choice_label(ASPECT_RATIOS, ratio)}")
+
+    def _set_crop(self, ratio: str):
+        self.player.set_crop(ratio)
+        self._check_menu_value(self.menu_crop, ratio)
+        self._show_osd(f"Recorte: {choice_label(CROP_RATIOS, ratio)}")
+
+    def _cycle_choice(self, choices, setter, current):
+        setter(next_choice(choices, current))
+
+    def _set_deinterlace(self, mode: str, announce: bool = True):
+        needs_reload = self.player.set_deinterlace(mode)
+        self._check_menu_value(self.menu_deinterlace, self.player.get_deinterlace())
+        if needs_reload and self.current_index != -1:
+            # Volver al automatico: solo con un reproductor nuevo (ver backend).
+            self.player.reload_preserving_state()
+        if announce:
+            self._show_osd(f"Desentrelazado: {choice_label(DEINTERLACE_LABELS, self.player.get_deinterlace())}")
+
+    def _on_normalize_toggled(self, checked: bool):
+        if not self.player.set_volume_normalization(checked) and checked:
+            self.act_normalize_volume.blockSignals(True)
+            self.act_normalize_volume.setChecked(False)
+            self.act_normalize_volume.blockSignals(False)
+            self.statusBar().showMessage("No se pudo activar el normalizador de volumen", 5000)
+
+    def _populate_audio_device_menu(self):
+        self.menu_audio_device.clear()
+        group = QActionGroup(self.menu_audio_device)
+        group.setExclusive(True)
+        current = self.player.get_audio_device()
+        devices = self.player.audio_output_devices() or [("", "Predeterminado")]
+        if current and current not in {device for device, _name in devices}:
+            # El dispositivo guardado ya no esta (desconectado): se sigue
+            # mostrando para que se vea por que no suena por ahi.
+            devices.append((current, "(desconectado)"))
+        for device, name in devices:
+            action = QAction(name or "Predeterminado", self.menu_audio_device, checkable=True)
+            action.setChecked(device == current)
+            action.triggered.connect(lambda _checked, d=device: self.player.set_audio_device(d))
+            group.addAction(action)
+            self.menu_audio_device.addAction(action)
+
+    def show_media_info(self):
+        details = self.player.media_details()
+        if details is None:
+            self.statusBar().showMessage("No hay nada abierto", 3000)
+            return None
+        dialog = MediaInfoDialog(details, self)
+        dialog.show()
+        return dialog
 
     # ------------------------------------------------------------ tema
     def _apply_theme(self, key: str):

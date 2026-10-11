@@ -38,6 +38,17 @@ MAX_NETWORK_CACHING_MS = 60_000
 SUBTITLE_SCALES = (75, 100, 150, 200)
 VIDEO_SCALES = (0.0, 0.5, 1.0, 1.5, 2.0)
 EQ_BAND_COUNT = 10
+# Desentrelazado: "auto" = lo que decida libVLC; "off" = nunca; el resto son
+# los modos de libVLC 3 (video_set_deinterlace).
+DEINTERLACE_MODES = ("auto", "off", "blend", "bob", "linear", "x", "yadif", "yadif2x")
+# Ajustes de imagen (filtro "adjust" de libVLC): (min, max, neutro).
+VIDEO_ADJUST_RANGES = {
+    "brightness": (0.0, 2.0, 1.0),
+    "contrast": (0.0, 2.0, 1.0),
+    "saturation": (0.0, 3.0, 1.0),
+    "hue": (-180.0, 180.0, 0.0),
+    "gamma": (0.01, 10.0, 1.0),
+}
 EQ_MIN_DB = -20.0
 EQ_MAX_DB = 20.0
 # Tope de entradas de la sesion: evita que un session.json gigante (o
@@ -63,6 +74,16 @@ class EqualizerSettings:
     preset: int = -1  # -1 = "Personalizado"
     preamp: float = 0.0
     bands: list = field(default_factory=lambda: [0.0] * EQ_BAND_COUNT)
+
+
+@dataclass
+class VideoAdjustSettings:
+    enabled: bool = False
+    brightness: float = 1.0
+    contrast: float = 1.0
+    saturation: float = 1.0
+    hue: float = 0.0
+    gamma: float = 1.0
 
 
 @dataclass
@@ -93,6 +114,12 @@ class Settings:
     # Una sola ventana: abrir un archivo con el programa ya abierto lo manda
     # a esa ventana (ver single_instance.py).
     allow_multiple_windows: bool = False
+    # Video > Desentrelazado y Ajustes de video; Audio > Dispositivo de
+    # salida ("" = predeterminado del sistema) y Normalizar volumen.
+    deinterlace: str = "auto"
+    video_adjust: VideoAdjustSettings = field(default_factory=VideoAdjustSettings)
+    audio_device: str = ""
+    normalize_volume: bool = False
 
 
 @dataclass
@@ -160,6 +187,18 @@ def _equalizer_from_dict(raw) -> EqualizerSettings:
     return eq
 
 
+def _video_adjust_from_dict(raw) -> VideoAdjustSettings:
+    adj = VideoAdjustSettings()
+    if not isinstance(raw, dict):
+        return adj
+    adj.enabled = _bool(raw.get("enabled"), adj.enabled)
+    for name, (low, high, _neutral) in VIDEO_ADJUST_RANGES.items():
+        num = _number(raw.get(name))
+        if num is not None:
+            setattr(adj, name, float(max(low, min(high, num))))
+    return adj
+
+
 def settings_from_dict(raw) -> Settings:
     s = Settings()
     if not isinstance(raw, dict):
@@ -190,6 +229,11 @@ def settings_from_dict(raw) -> Settings:
         s.network_caching_ms = int(max(MIN_NETWORK_CACHING_MS, min(MAX_NETWORK_CACHING_MS, round(caching))))
     s.rtsp_tcp = _bool(raw.get("rtsp_tcp"), s.rtsp_tcp)
     s.allow_multiple_windows = _bool(raw.get("allow_multiple_windows"), s.allow_multiple_windows)
+    s.deinterlace = _choice(raw.get("deinterlace"), DEINTERLACE_MODES, s.deinterlace)
+    s.video_adjust = _video_adjust_from_dict(raw.get("video_adjust"))
+    device = _str(raw.get("audio_device"))
+    s.audio_device = device if len(device) <= 512 else ""
+    s.normalize_volume = _bool(raw.get("normalize_volume"), s.normalize_volume)
     return s
 
 

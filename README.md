@@ -89,6 +89,16 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - Ecualizador gráfico de 10 bandas más preamplificador (−20 a +20 dB, en
   **pasos de 0,1 dB**: cada banda tiene su slider y un campo numérico) con
   los presets de VLC (en español: Plano, Clásica, Rock, Pop, ...).
+- **Normalizar volumen** (Audio): baja solo los pasajes muy fuertes, en
+  vivo y junto con el ecualizador. **Dispositivo de salida** (Audio): elegir
+  por qué altavoces/auriculares suena (se recuerda).
+- **Imagen** (Video): **Relación de aspecto** (`A` la cambia), **Recortar**
+  (`C`; 16:9, 4:3, 2,35:1...), **Desentrelazado** (Automático, Desactivado,
+  Blend, Bob, Lineal, X, Yadif, Yadif 2x; se recuerda) y **Ajustes de video**
+  (`Ctrl+E`: brillo, contraste, saturación, tono y gamma, en vivo; se recuerdan).
+- **Información del medio** (`Ctrl+I`): archivo, tamaño, duración, etiquetas
+  y cada pista (códec, resolución, cuadros/s, canales, frecuencia, bitrate,
+  idioma), con un botón para copiarla.
 - **Capítulos** de MKV/MP4: menú Reproducción → Capítulos, `RePág`/`AvPág`,
   rayas azules en la barra y el nombre del capítulo en la vista previa.
 - **Sincronía de audio** (A/V): `J`/`K` ±50 ms, con OSD.
@@ -194,6 +204,8 @@ La lista completa está en Ayuda → Atajos de teclado (`F1`).
 | Ctrl+Shift+A / B / L | Marcar punto A / punto B / limpiar bucle A-B |
 | .                | Avanzar un fotograma (en pausa) |
 | Ctrl+Shift+S     | Captura rápida             |
+| A / C            | Siguiente relación de aspecto / recorte |
+| Ctrl+E / Ctrl+I  | Ajustes de video / Información del medio |
 | F1               | Atajos de teclado          |
 
 ## Desarrollo

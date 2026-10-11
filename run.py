@@ -68,6 +68,10 @@ def install_spanish_translator(app) -> bool:
 
 
 def main():
+    from player.self_test import main as self_test, wants_self_test
+
+    if wants_self_test(sys.argv[1:]):
+        sys.exit(self_test(sys.argv[1:]))
     opts = parse_args(sys.argv[1:])
     log_dir = setup_logging(debug=opts["debug"])
     app = QApplication(sys.argv)

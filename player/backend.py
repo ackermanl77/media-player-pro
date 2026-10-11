@@ -11,12 +11,19 @@ import logging
 import os
 import pathlib
 import sys
+import time
 
 import vlc
 from PySide6.QtCore import QObject, Signal
 
+from . import vlc_internals
 from .formats import is_audio_file, is_url
-from .settings import HW_DECODING_MODES, MAX_VOLUME  # "any" = decodificacion por hardware automatica
+from .settings import (  # "any" = decodificacion por hardware automatica
+    DEINTERLACE_MODES,
+    HW_DECODING_MODES,
+    MAX_VOLUME,
+    VideoAdjustSettings,
+)
 
 BASE_VLC_ARGS = [
     "--no-video-title-show",
@@ -198,6 +205,18 @@ class VLCPlayer:
         self._subtitle_scale = DEFAULT_SUBTITLE_SCALE
         self._instance_subtitle_scale = DEFAULT_SUBTITLE_SCALE
         self._video_scale = 0.0  # 0 = ajustar a ventana (default de libVLC)
+        # Estado del MediaPlayer que se reaplica al recrearlo (como el zoom):
+        # relacion de aspecto y recorte ("" = el del video), desentrelazado
+        # ("auto" = el default de libVLC, que no se puede volver a pedir una
+        # vez fijado otro modo: hace falta un MediaPlayer nuevo), ajustes de
+        # imagen, dispositivo de salida ("" = predeterminado) y normalizacion.
+        self._aspect_ratio = ""
+        self._crop = ""
+        self._deinterlace = "auto"
+        self._deinterlace_applied = False
+        self._video_adjust = VideoAdjustSettings()
+        self._audio_device = ""
+        self._normalize = False
         # Mejora por GPU (opciones de instancia, ver gpu_instance_args).
         self._gpu_upscale = False
         self._gpu_hdr = False
@@ -310,6 +329,11 @@ class VLCPlayer:
         # perdia en silencio al recrear -- el menu seguia marcando "200%"
         # mientras el video volvia a "ajustar a ventana".
         self.media_player.video_set_scale(self._video_scale)
+        self._apply_video_state()
+        if self._audio_device:
+            self.media_player.audio_output_device_set(None, self._audio_device)
+        if self._normalize:
+            self._apply_audio_filters()
         if self._video_widget is not None:
             _attach_window(self.media_player, self._video_widget)
 
@@ -618,6 +642,87 @@ class VLCPlayer:
     def set_audio_track(self, track_id: int):
         self.media_player.audio_set_track(track_id)
 
+    # -- salida de audio -----------------------------------------------------
+    def audio_output_devices(self) -> list:
+        """[(id, descripcion)] de la salida de audio actual (el primero suele
+        ser "" = predeterminado del sistema)."""
+        devices = []
+        head = self.media_player.audio_output_device_enum()
+        node = head
+        try:
+            while node:
+                devices.append((_decode(node.contents.device), _decode(node.contents.description)))
+                node = node.contents.next
+        finally:
+            if head:
+                vlc.libvlc_audio_output_device_list_release(head)
+        return devices
+
+    def set_audio_device(self, device_id: str):
+        self._audio_device = device_id or ""
+        self.media_player.audio_output_device_set(None, self._audio_device)
+
+    def get_audio_device(self) -> str:
+        return self._audio_device
+
+    def volume_normalization_supported(self) -> bool:
+        return vlc_internals.audio_filters_supported()
+
+    def _apply_audio_filters(self) -> bool:
+        chain = ":".join(
+            (["equalizer"] if self._equalizer is not None else []) + (["normvol"] if self._normalize else [])
+        )
+        return vlc_internals.set_audio_filters(self.media_player, chain)
+
+    def set_volume_normalization(self, enabled: bool) -> bool:
+        """Normalizador de volumen de VLC (normvol: baja los pasajes que
+        superan el nivel maximo), en vivo. False si esta version de libVLC no
+        lo permite (ver vlc_internals)."""
+        if not self.volume_normalization_supported():
+            self._normalize = False
+            return False
+        was, self._normalize = self._normalize, bool(enabled)
+        if self._normalize or was:
+            return self._apply_audio_filters()
+        return True
+
+    def is_volume_normalized(self) -> bool:
+        return self._normalize
+
+    # -- informacion del medio ------------------------------------------------
+    def media_details(self, timeout_s: float = 3.0):
+        """Datos del archivo/stream actual para el dialogo de informacion:
+        {"path", "duration_ms", "meta": {...}, "tracks": [...]} (ver
+        vlc_internals.media_tracks), o None si no hay nada cargado. Si el
+        Media todavia no se analizo, lo analiza (con tope de tiempo)."""
+        media = self._media
+        if media is None or self._current_path is None:
+            return None
+        tracks = vlc_internals.media_tracks(media)
+        if not tracks and media.get_parsed_status() != vlc.MediaParsedStatus.done:
+            flags = vlc.MediaParseFlag.network if is_url(self._current_path) else vlc.MediaParseFlag.local
+            media.parse_with_options(flags, int(timeout_s * 1000))
+            deadline = time.monotonic() + timeout_s
+            while media.get_parsed_status() == 0 and time.monotonic() < deadline:
+                time.sleep(0.05)
+            tracks = vlc_internals.media_tracks(media)
+        meta = {}
+        for key, field in (
+            ("title", vlc.Meta.Title), ("artist", vlc.Meta.Artist), ("album", vlc.Meta.Album),
+            ("date", vlc.Meta.Date), ("genre", vlc.Meta.Genre), ("track_number", vlc.Meta.TrackNumber),
+            ("description", vlc.Meta.Description), ("copyright", vlc.Meta.Copyright),
+            ("encoded_by", vlc.Meta.EncodedBy), ("now_playing", vlc.Meta.NowPlaying),
+        ):
+            value = _decode(media.get_meta(field)).strip()
+            if value:
+                meta[key] = value
+        return {
+            "path": self._current_path,
+            "duration_ms": max(int(media.get_duration()), 0),
+            "meta": meta,
+            "tracks": tracks,
+        }
+
     def get_audio_delay_ms(self) -> int:
         return self.media_player.audio_get_delay() // 1000
 
@@ -743,6 +848,75 @@ class VLCPlayer:
 
     def get_video_scale(self) -> float:
         return self._video_scale
+
+    def _apply_video_state(self):
+        """Aspecto, recorte, desentrelazado y ajustes de imagen en un
+        MediaPlayer recien creado."""
+        self._deinterlace_applied = False
+        if self._aspect_ratio:
+            self.media_player.video_set_aspect_ratio(self._aspect_ratio)
+        if self._crop:
+            self.media_player.video_set_crop_geometry(self._crop)
+        if self._deinterlace != "auto":
+            self._set_deinterlace_now(self._deinterlace)
+        if self._video_adjust.enabled:
+            self._apply_video_adjust()
+
+    def set_aspect_ratio(self, ratio: str):
+        """"16:9", "4:3"... o "" para el del video."""
+        self._aspect_ratio = ratio or ""
+        self.media_player.video_set_aspect_ratio(self._aspect_ratio or None)
+
+    def get_aspect_ratio(self) -> str:
+        return self._aspect_ratio
+
+    def set_crop(self, ratio: str):
+        """Recorta el video a esa relacion ("16:9", "2.35:1"...); "" = sin recorte."""
+        self._crop = ratio or ""
+        self.media_player.video_set_crop_geometry(self._crop or None)
+
+    def get_crop(self) -> str:
+        return self._crop
+
+    def _set_deinterlace_now(self, mode: str):
+        # libVLC 3: NULL/"" lo desactiva; un nombre de modo lo activa con ese modo.
+        self.media_player.video_set_deinterlace(None if mode == "off" else mode)
+        self._deinterlace_applied = True
+
+    def set_deinterlace(self, mode: str) -> bool:
+        """Modo de desentrelazado (ver settings.DEINTERLACE_MODES). Devuelve
+        True si hay que recrear el reproductor para aplicarlo: volver a
+        "auto" despues de haber fijado otro modo (libVLC 3 no tiene API para
+        pedir de nuevo el automatico)."""
+        mode = mode if mode in DEINTERLACE_MODES else "auto"
+        self._deinterlace = mode
+        if mode == "auto":
+            return self._deinterlace_applied
+        self._set_deinterlace_now(mode)
+        return False
+
+    def get_deinterlace(self) -> str:
+        return self._deinterlace
+
+    def _apply_video_adjust(self):
+        adj = self._video_adjust
+        mp = self.media_player
+        options = vlc.VideoAdjustOption
+        mp.video_set_adjust_float(options.Brightness, adj.brightness)
+        mp.video_set_adjust_float(options.Contrast, adj.contrast)
+        mp.video_set_adjust_float(options.Saturation, adj.saturation)
+        mp.video_set_adjust_float(options.Hue, adj.hue)
+        mp.video_set_adjust_float(options.Gamma, adj.gamma)
+        mp.video_set_adjust_int(options.Enable, 1 if adj.enabled else 0)
+
+    def set_video_adjust(self, adjust: VideoAdjustSettings):
+        """Brillo, contraste, saturacion, tono y gamma (filtro "adjust" de
+        libVLC, en vivo)."""
+        self._video_adjust = adjust
+        self._apply_video_adjust()
+
+    def get_video_adjust(self) -> VideoAdjustSettings:
+        return self._video_adjust
 
     def take_snapshot(self, path: str, width: int = 0, height: int = 0) -> bool:
         """True si libVLC acepto la captura (sin salida de video devuelve
@@ -900,6 +1074,7 @@ class VLCPlayer:
         libera solo al recolectarlo)."""
         old, self._equalizer = self._equalizer, eq
         self.media_player.set_equalizer(eq)
+        self._keep_normalizer()
         if old is not None and old is not eq:
             old.release()
 
@@ -942,15 +1117,23 @@ class VLCPlayer:
             self._equalizer = vlc.AudioEqualizer()
         self._equalizer.set_preamp(amp)
         self.media_player.set_equalizer(self._equalizer)
+        self._keep_normalizer()
 
     def set_equalizer_band(self, index: int, amp: float):
         if self._equalizer is None:
             self._equalizer = vlc.AudioEqualizer()
         self._equalizer.set_amp_at_index(amp, index)
         self.media_player.set_equalizer(self._equalizer)
+        self._keep_normalizer()
 
     def disable_equalizer(self):
         self._replace_equalizer(None)
+
+    def _keep_normalizer(self):
+        # set_equalizer deja la cadena de filtros en "equalizer" (o vacia):
+        # volver a agregar el normalizador.
+        if self._normalize:
+            self._apply_audio_filters()
 
 
 class MediaInfoProbe:
