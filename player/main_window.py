@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from functools import partial
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QStandardPaths, Qt, QThread, QTimer, QUrl
@@ -50,6 +51,7 @@ from .formats import (
     build_open_filter,
     format_rate,
     format_time,
+    is_audio_file,
     is_url,
     parse_time_input,
     path_key,
@@ -258,6 +260,11 @@ class MainWindow(QMainWindow):
         # Atajos cambiados por el usuario (4.11), sobre los predeterminados ya registrados.
         self.action_registry.apply_overrides(self.settings.shortcuts)
         self.action_registry.register_shortcuts_on_owner()
+        # Teclas multimedia con la ventana sin foco y el panel multimedia de Windows (4.12).
+        from .media_controls import SystemMediaControls
+
+        self.system_media = SystemMediaControls(self)
+        self.system_media.pressed.connect(self.media_command)
         self._refresh_icons()
         self.playlist.contentsChanged.connect(self._schedule_session_save)
         self.playlist.summaryChanged.connect(self.playlist_dock.setWindowTitle)
@@ -1029,12 +1036,14 @@ class MainWindow(QMainWindow):
         S(Qt.Key.Key_Down, "Bajar volumen", lambda: self._nudge_volume(-5))
         # Teclas multimedia del teclado (Windows las manda como WM_APPCOMMAND
         # a la ventana activa).
-        S(Qt.Key.Key_MediaTogglePlayPause, "Tecla multimedia Reproducir/Pausar", self.toggle_play_pause)
-        S(Qt.Key.Key_MediaPlay, "Tecla multimedia Reproducir", self._media_key_play)
-        S(Qt.Key.Key_MediaPause, "Tecla multimedia Pausa", self._media_key_pause)
-        S(Qt.Key.Key_MediaStop, "Tecla multimedia Detener", self.stop)
-        S(Qt.Key.Key_MediaNext, "Tecla multimedia Siguiente", lambda: self.play_next(auto=False))
-        S(Qt.Key.Key_MediaPrevious, "Tecla multimedia Anterior", self.play_previous)
+        # Con los controles del sistema (SMTC) la misma pulsacion puede llegar
+        # dos veces (aqui y por SMTC): media_command() descarta la repetida.
+        S(Qt.Key.Key_MediaTogglePlayPause, "Tecla multimedia Reproducir/Pausar", lambda: self.media_command("toggle"))
+        S(Qt.Key.Key_MediaPlay, "Tecla multimedia Reproducir", lambda: self.media_command("play"))
+        S(Qt.Key.Key_MediaPause, "Tecla multimedia Pausa", lambda: self.media_command("pause"))
+        S(Qt.Key.Key_MediaStop, "Tecla multimedia Detener", lambda: self.media_command("stop"))
+        S(Qt.Key.Key_MediaNext, "Tecla multimedia Siguiente", lambda: self.media_command("next"))
+        S(Qt.Key.Key_MediaPrevious, "Tecla multimedia Anterior", lambda: self.media_command("previous"))
         self.action_registry.static_rows = [
             ("Buscar en la lista (con la lista enfocada)", QKeySequence(QKeySequence.StandardKey.Find)
              .toString(QKeySequence.SequenceFormat.NativeText)),
@@ -1159,6 +1168,8 @@ class MainWindow(QMainWindow):
         title = self.player.now_playing()
         if self.playlist.set_icy_title(path, title):
             self.setWindowTitle(f"Reproductor Multimedia Pro — {title}")
+            if getattr(self, "system_media", None) is not None:
+                self.system_media.set_media(title, self._display_name(path), video=False)
 
     def _on_snapshot_taken(self, filename: str):
         if getattr(self, "_quick_snapshot_pending", None):
@@ -1169,6 +1180,20 @@ class MainWindow(QMainWindow):
     def _update_play_icon(self):
         playing = self.player.media_player is not None and self.player.is_playing()
         self._set_action_icon(self.act_play_pause, "pause" if playing else "play")
+        self._update_system_media_status(playing)
+
+    def _update_system_media_status(self, playing: bool) -> None:
+        controls = getattr(self, "system_media", None)
+        if controls is None or not controls.available:
+            return
+        if playing:
+            controls.set_status("playing")
+        elif self.current_index != -1 and self.player.is_paused():
+            controls.set_status("paused")
+        elif self.current_index != -1:
+            controls.set_status("stopped")
+        else:
+            controls.set_status("closed")
 
     # -- streams de red ----------------------------------------------------
     def _maybe_schedule_stream_visualizer(self, gen: int):
@@ -1600,6 +1625,9 @@ class MainWindow(QMainWindow):
         self.player.play()
         self.player.set_rate(self._rate)
         self.setWindowTitle(f"Reproductor Multimedia Pro — {self._display_name(path)}")
+        if getattr(self, "system_media", None) is not None:
+            self.system_media.set_media(self._display_name(path), "Reproductor Multimedia Pro",
+                                        video=not (is_audio_file(path) or is_url(path)))
         verb = "Abriendo" if is_url(path) else "Reproduciendo"
         self.statusBar().showMessage(f"{verb}: {self._display_name(path)}")
         if saved_ms:
@@ -1636,6 +1664,28 @@ class MainWindow(QMainWindow):
             self.play_index(self.current_index)
             return
         self.player.toggle_pause()
+
+    # Una pulsacion de tecla multimedia que llega dos veces (por la ventana y
+    # por SMTC) en menos de esto se cuenta una vez; play/pause/toggle son un grupo.
+    MEDIA_COMMAND_DEDUP_S = 0.4
+
+    def media_command(self, command: str) -> bool:
+        """Teclas multimedia, botones del panel multimedia de Windows (SMTC) y
+        auriculares. False si se descarto por repetida."""
+        group = "playback" if command in ("play", "pause", "toggle") else command
+        now = time.monotonic()
+        last_group, last_at = getattr(self, "_last_media_command", ("", -1e9))
+        if group == last_group and now - last_at < self.MEDIA_COMMAND_DEDUP_S:
+            return False
+        self._last_media_command = (group, now)
+        handlers = {
+            "toggle": self.toggle_play_pause, "play": self._media_key_play, "pause": self._media_key_pause,
+            "stop": self.stop, "next": lambda: self.play_next(auto=False), "previous": self.play_previous,
+        }
+        handler = handlers.get(command)
+        if handler is not None:
+            handler()
+        return handler is not None
 
     def _media_key_play(self):
         if self.current_index == -1 or self.player.is_idle() or self.player.is_paused():
@@ -2612,6 +2662,8 @@ class MainWindow(QMainWindow):
             super().closeEvent(event)
             return
         self._closed = True
+        if getattr(self, "system_media", None) is not None:
+            self.system_media.close()
         # Salir de pantalla completa antes de guardar: saveGeometry()/
         # saveState() en pantalla completa guardarian esa ventana (y el dock
         # oculto), y la proxima vez arrancaria asi.

@@ -29,6 +29,14 @@ APP_VERSION = read_version(SPECPATH)
 
 hiddenimports = ["player.backend", "player.main_window", "player.formats"]
 hiddenimports += collect_submodules("player")
+# pywinrt (controles multimedia de Windows, player/media_controls.py): paquetes de
+# espacio de nombres winrt.* con extensiones nativas que se importan dentro de un try.
+try:
+    import winrt  # noqa: F401
+except ImportError:
+    pass
+else:
+    hiddenimports += collect_submodules("winrt")
 
 # player/main_window.py busca los iconos en <MEIPASS>/assets/... cuando esta
 # empaquetado (ver _icon_path en ese archivo) -- deben quedar en esa carpeta

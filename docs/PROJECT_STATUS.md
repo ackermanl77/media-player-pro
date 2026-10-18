@@ -142,6 +142,16 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Controles multimedia del sistema (2026-10-17, 4.12).** `player/media_controls.py` registra el
+  reproductor en los SMTC de Windows a través de un `Windows.Media.Playback.MediaPlayer` propio que
+  no reproduce nada (pywinrt, `requirements.txt` solo en Windows; sin él, `available` es False):
+  teclas multimedia con la ventana sin foco, título y estado en el panel multimedia y la pantalla
+  de bloqueo. Botones y teclas de la ventana pasan por `MainWindow.media_command()`, que cuenta una
+  vez la misma pulsación llegada por los dos caminos (400 ms). Verificado con el administrador de
+  sesiones de Windows (`GlobalSystemMediaTransportControlsSessionManager`): la sesión aparece con
+  su título, pasa de Playing a Paused y desaparece al cerrar. Pruebas: `tests/test_media_controls.py`.
+  Pendiente: los botones de la miniatura de la barra de tareas (ITaskbarList3).
+
 - **Atajos editables (2026-10-17, 4.11).** Ayuda → Atajos de teclado (`player/shortcuts_dialog.py`)
   reasigna, quita o restaura el atajo de cualquier acción del registro (también las que no tenían
   uno); los fijos (QShortcut) se muestran en gris. `ActionRegistry` recuerda el predeterminado de

@@ -1,3 +1,11 @@
 python-vlc>=3.0.20123
 PySide6>=6.6.0
 requests>=2.31.0
+# Controles multimedia del sistema de Windows (teclas multimedia sin foco, panel
+# multimedia): opcionales en tiempo de ejecucion, ver player/media_controls.py.
+winrt-runtime>=3.2,<4; sys_platform == "win32"
+winrt-Windows.Foundation>=3.2,<4; sys_platform == "win32"
+winrt-Windows.Foundation.Collections>=3.2,<4; sys_platform == "win32"
+winrt-Windows.Media>=3.2,<4; sys_platform == "win32"
+winrt-Windows.Media.Playback>=3.2,<4; sys_platform == "win32"
+winrt-Windows.Storage.Streams>=3.2,<4; sys_platform == "win32"
