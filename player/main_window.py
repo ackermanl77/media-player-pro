@@ -347,6 +347,7 @@ class MainWindow(QMainWindow):
             self.player.set_audio_device(s.audio_device)
         if s.normalize_volume and self.act_normalize_volume.isEnabled():
             self.act_normalize_volume.setChecked(True)
+        self._set_audio_passthrough(s.audio_passthrough, announce=False)
         if s.geometry:
             self._restored_geometry = self.restoreGeometry(QByteArray.fromBase64(s.geometry.encode("ascii")))
         if s.window_state:
@@ -386,6 +387,7 @@ class MainWindow(QMainWindow):
         s.audio_device = self.player.get_audio_device()
         s.normalize_volume = self.player.is_volume_normalized()
         s.shortcuts = self.action_registry.overrides()
+        s.audio_passthrough = self.player.get_audio_passthrough()
         return s
 
     def save_settings_now(self) -> bool:
@@ -886,9 +888,23 @@ class MainWindow(QMainWindow):
         self.menu_audio_tracks.aboutToShow.connect(self._populate_audio_track_menu)
         self.menu_audio_device = QMenu("Dispositivo de salida", menu_audio)
         self.menu_audio_device.aboutToShow.connect(self._populate_audio_device_menu)
+        # Passthrough a un receptor (3.16): opcion de instancia, como la mejora por GPU.
+        self.menu_passthrough = QMenu("Passthrough (receptor por HDMI/S/PDIF)", menu_audio)
+        self.menu_passthrough.setToolTipsVisible(True)
+        self.passthrough_group = QActionGroup(self)
+        for mode, text in (("off", "Desactivado (decodificar en la PC)"), ("ac3_dts", "AC3 y DTS"),
+                           ("all", "Todos los formatos (E-AC3, TrueHD, DTS-HD)")):
+            action = self.menu_passthrough.addAction(text)
+            action.setCheckable(True)
+            action.setData(mode)
+            action.setChecked(mode == "off")
+            action.setToolTip("Envía el audio comprimido sin decodificar a un receptor o barra de sonido; "
+                              "solo si el dispositivo de salida lo admite.")
+            self.passthrough_group.addAction(action)
+            action.triggered.connect(lambda _checked, m=mode: self._set_audio_passthrough(m))
         R.populate(menu_audio, [
             "mute", "equalizer", "visualizer", "normalize_volume", self.menu_audio_tracks, self.menu_audio_device,
-            None, "audio_earlier", "audio_later", "audio_sync_reset",
+            self.menu_passthrough, None, "audio_earlier", "audio_later", "audio_sync_reset",
         ])
         if not self.player.volume_normalization_supported():
             self.act_normalize_volume.setEnabled(False)
@@ -2422,6 +2438,18 @@ class MainWindow(QMainWindow):
         # proxima carga ya recrea el Instance con el tamano nuevo.
         self.player.reload_preserving_state()
 
+    def _set_audio_passthrough(self, mode: str, announce: bool = True):
+        for action in self.passthrough_group.actions():
+            action.setChecked(action.data() == mode)
+        if mode == self.player.get_audio_passthrough():
+            return
+        self.player.set_audio_passthrough(mode)
+        if self.current_index != -1:
+            self.player.reload_preserving_state()
+        self._report_dropped_options()
+        if announce:
+            self._show_osd("Passthrough: " + {"off": "desactivado", "ac3_dts": "AC3 y DTS", "all": "todos los formatos"}[mode])
+
     # -- mejora por GPU ------------------------------------------------------
     def _on_gpu_options_changed(self):
         hw = next((a.data() for a in self.hw_decoding_group.actions() if a.isChecked()), "any")
@@ -2446,6 +2474,10 @@ class MainWindow(QMainWindow):
             for action in self.hw_decoding_group.actions():
                 action.setChecked(action.data() == "any")
             messages.append("la mejora por GPU")
+        if "passthrough" in dropped:
+            for action in self.passthrough_group.actions():
+                action.setChecked(action.data() == "off")
+            messages.append("el passthrough de audio")
         if "visualizer" in dropped:
             messages.append("el visualizador de audio")
         if messages:

@@ -33,6 +33,8 @@ MAX_RATE = 4.0
 RATE_STEP = 0.1
 THEMES = ("system", "dark", "light")
 HW_DECODING_MODES = ("any", "d3d11va", "dxva2", "none")
+# Audio > Passthrough (3.16): audio comprimido sin decodificar a un receptor por HDMI/S/PDIF.
+PASSTHROUGH_MODES = ("off", "ac3_dts", "all")
 MIN_NETWORK_CACHING_MS = 0
 MAX_NETWORK_CACHING_MS = 60_000
 SUBTITLE_SCALES = (75, 100, 150, 200)
@@ -123,6 +125,7 @@ class Settings:
     # Atajos cambiados por el usuario (4.11): id de accion -> atajo en texto
     # portable de Qt ("" = sin atajo). Solo lo que difiere del predeterminado.
     shortcuts: dict = field(default_factory=dict)
+    audio_passthrough: str = "off"
 
 
 @dataclass
@@ -238,6 +241,7 @@ def settings_from_dict(raw) -> Settings:
     s.audio_device = device if len(device) <= 512 else ""
     s.normalize_volume = _bool(raw.get("normalize_volume"), s.normalize_volume)
     s.shortcuts = _shortcuts_from_dict(raw.get("shortcuts"))
+    s.audio_passthrough = _choice(raw.get("audio_passthrough"), PASSTHROUGH_MODES, s.audio_passthrough)
     return s
 
 

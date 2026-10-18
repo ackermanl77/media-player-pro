@@ -145,6 +145,19 @@ def gpu_instance_args(upscale: bool, hdr: bool, hw_decoding: str) -> list:
     return args
 
 
+def passthrough_instance_args(mode: str, platform: str = sys.platform) -> list:
+    """Audio > Passthrough (3.16): el audio comprimido (AC3/DTS, o tambien E-AC3,
+    TrueHD y DTS-HD) sale sin decodificar hacia un receptor o barra de sonido.
+    En Windows es --mmdevice-passthrough de la salida WASAPI (1 = AC3/DTS,
+    2 = todos); en otros sistemas, --spdif. Solo funciona si el dispositivo de
+    salida lo admite; si no, libVLC decodifica como siempre."""
+    if mode not in ("ac3_dts", "all"):
+        return []
+    if platform == "win32":
+        return [f"--mmdevice-passthrough={1 if mode == 'ac3_dts' else 2}"]
+    return ["--spdif"]
+
+
 def create_instance_with_fallback(base_args, optional_groups, factory=None):
     """Intenta vlc.Instance(base + todos los grupos opcionales). Una opcion
     desconocida (p. ej. las de GPU en un VLC viejo) hace que vlc.Instance
@@ -222,6 +235,8 @@ class VLCPlayer:
         self._gpu_hdr = False
         self._hw_decoding = "any"
         self._instance_gpu_args = []
+        self._passthrough = "off"  # Audio > Passthrough (3.16)
+        self._instance_passthrough_args = []
         # Grupos de opciones que libVLC rechazo en la ultima recreacion (ver
         # create_instance_with_fallback); la UI los lee con
         # take_dropped_options() para avisar y desmarcar el menu.
@@ -297,11 +312,15 @@ class VLCPlayer:
     def _gpu_args(self) -> list:
         return gpu_instance_args(self._gpu_upscale, self._gpu_hdr, self._hw_decoding)
 
+    def _passthrough_args(self) -> list:
+        return passthrough_instance_args(self._passthrough)
+
     def _create_instance(self, visualizer: bool):
         self._release_instance()
         base = BASE_VLC_ARGS + [f"--sub-text-scale={self._subtitle_scale}"]
         gpu = self._gpu_args()
-        groups = [("gpu", gpu), ("visualizer", VISUALIZER_VLC_ARGS if visualizer else [])]
+        passthrough = self._passthrough_args()
+        groups = [("gpu", gpu), ("passthrough", passthrough), ("visualizer", VISUALIZER_VLC_ARGS if visualizer else [])]
         log.info("Creando vlc.Instance con %s + %s", base, [g for _n, g in groups if g])
         self.instance, dropped = create_instance_with_fallback(base, groups)
         if dropped:
@@ -311,6 +330,9 @@ class VLCPlayer:
             self._gpu_upscale = self._gpu_hdr = False
             self._hw_decoding = "any"
             gpu = []
+        if "passthrough" in dropped:
+            self._passthrough = "off"
+            passthrough = []
         if "visualizer" in dropped:
             visualizer = False
         self.media_player = self.instance.media_player_new()
@@ -319,6 +341,7 @@ class VLCPlayer:
         self._visualizer_on = visualizer
         self._instance_subtitle_scale = self._subtitle_scale
         self._instance_gpu_args = gpu
+        self._instance_passthrough_args = passthrough
 
         self.media_player.audio_set_volume(self._volume)
         self.media_player.audio_set_mute(self._muted)
@@ -392,6 +415,7 @@ class VLCPlayer:
             want_visualizer != self._visualizer_on
             or self._subtitle_scale != self._instance_subtitle_scale
             or self._gpu_args() != self._instance_gpu_args
+            or self._passthrough_args() != self._instance_passthrough_args
         )
 
     def load(self, path_or_url: str, enable_visualizer: bool = False, start_ms: int = 0):
@@ -840,6 +864,15 @@ class VLCPlayer:
 
     def gpu_options(self):
         return self._gpu_upscale, self._gpu_hdr, self._hw_decoding
+
+    # -- passthrough de audio (3.16) -------------------------------------------
+    def set_audio_passthrough(self, mode: str):
+        """Como las opciones de GPU: se aplica en la proxima load() o con
+        reload_preserving_state()."""
+        self._passthrough = mode if mode in ("off", "ac3_dts", "all") else "off"
+
+    def get_audio_passthrough(self) -> str:
+        return self._passthrough
 
     # -- video -------------------------------------------------------------
     def set_video_scale(self, factor: float):

@@ -142,6 +142,14 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Passthrough de audio (2026-10-17, 3.16).** Audio → Passthrough: Desactivado / AC3 y DTS / Todos
+  los formatos. Opción de instancia como la mejora por GPU (`passthrough_instance_args()`:
+  `--mmdevice-passthrough=1|2` en Windows, `--spdif` en otros sistemas; un grupo propio en
+  `create_instance_with_fallback`, que se descarta con aviso si libVLC lo rechaza); se aplica con
+  `reload_preserving_state()` y se guarda en `Settings.audio_passthrough`. Comprobado que libVLC
+  3.0.23 crea la instancia con cada valor; si el dispositivo no lo admite, libVLC decodifica como
+  siempre (falta probarlo con un receptor real). Pruebas: `tests/test_passthrough.py`.
+
 - **Controles multimedia del sistema (2026-10-17, 4.12).** `player/media_controls.py` registra el
   reproductor en los SMTC de Windows a través de un `Windows.Media.Playback.MediaPlayer` propio que
   no reproduce nada (pywinrt, `requirements.txt` solo en Windows; sin él, `available` es False):
