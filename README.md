@@ -125,6 +125,10 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - **Audio → Passthrough**: envía el audio comprimido sin decodificar (AC3 y
   DTS, o también E-AC3, TrueHD y DTS-HD) a un receptor o barra de sonido por
   HDMI/S/PDIF, si el dispositivo de salida lo admite.
+- **Video → Rotar / voltear**: gira el video 90° a la derecha o a la
+  izquierda o 180°, o lo voltea horizontal o verticalmente (por ejemplo, un
+  video de celular grabado de costado). Se aplica a los archivos siguientes
+  hasta volver a «Sin rotar».
 - **Teclas multimedia y panel multimedia de Windows**: las teclas
   Reproducir/Pausa, Siguiente, Anterior y Detener (y los botones de
   auriculares Bluetooth) manejan el reproductor aunque su ventana no tenga el

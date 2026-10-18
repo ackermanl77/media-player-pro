@@ -168,6 +168,20 @@ manual interactiva del instalado ("Abrir con", reproducir).
   3.0.23 crea la instancia con cada valor; si el dispositivo no lo admite, libVLC decodifica como
   siempre (falta probarlo con un receptor real). Pruebas: `tests/test_passthrough.py`.
 
+- **Rotar / voltear (2026-10-18, 4.13).** Video → Rotar / voltear: sin rotar, 90° a la derecha,
+  180°, 90° a la izquierda, voltear horizontal/vertical (`ROTATIONS` en `player/video_options.py`).
+  Es el filtro `transform` de libVLC como opción de instancia (`rotation_instance_args()`:
+  `--video-filter=transform --transform-type=…`; `--video-filter` por Media se ignora), un grupo
+  propio en `create_instance_with_fallback` y se aplica con `reload_preserving_state()`; no se
+  guarda entre sesiones (la rotación suele ser de un video). Comprobado con libVLC 3.0.23 en una
+  ventana real: con decodificación por GPU (D3D11) el filtro no admite las superficies DX11 y
+  libVLC intercala una conversión a I420, y a 90/270° la ventana muestra el video vertical con su
+  forma correcta (captura de pantalla de la ventana). Limitaciones: la captura de libVLC
+  (`video_take_snapshot`) sale al tamaño original del video, con la imagen girada estirada; con
+  `--vout=dummy` el filtro no funciona (por eso no hay una prueba de imagen automática), y
+  `set_hwnd` fija la salida en Direct3D11, así que no se puede elegir otra. Pruebas:
+  `tests/test_rotation.py`.
+
 - **Controles multimedia del sistema (2026-10-17, 4.12).** `player/media_controls.py` registra el
   reproductor en los SMTC de Windows a través de un `Windows.Media.Playback.MediaPlayer` propio que
   no reproduce nada (pywinrt, `requirements.txt` solo en Windows; sin él, `available` es False):

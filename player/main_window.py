@@ -96,7 +96,7 @@ from .settings import (
 from .subtitle_dialog import OnlineSubtitleDialog, wait_for_subtitle_jobs
 from .url_dialog import OpenUrlDialog
 from .video_adjust_dialog import VideoAdjustDialog
-from .video_options import ASPECT_RATIOS, CROP_RATIOS, DEINTERLACE_LABELS, choice_label, next_choice
+from .video_options import ASPECT_RATIOS, CROP_RATIOS, DEINTERLACE_LABELS, ROTATIONS, choice_label, next_choice
 from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist_owns_key reexportados
     MARKER_BOOKMARK,
     MARKER_CHAPTER,
@@ -961,6 +961,7 @@ class MainWindow(QMainWindow):
         self.menu_crop = self._choice_menu(menu_video, "Recortar", CROP_RATIOS, "", self._set_crop)
         self.menu_deinterlace = self._choice_menu(
             menu_video, "Desentrelazado", DEINTERLACE_LABELS, "auto", self._set_deinterlace)
+        self.menu_rotation = self._choice_menu(menu_video, "Rotar / voltear", ROTATIONS, "", self._set_rotation)
         R.populate(menu_video, ["video_adjust", None, "media_info"])
 
         self.menu_gpu = None
@@ -2577,6 +2578,9 @@ class MainWindow(QMainWindow):
             for action in self.passthrough_group.actions():
                 action.setChecked(action.data() == "off")
             messages.append("el passthrough de audio")
+        if "rotation" in dropped:
+            self._check_menu_value(self.menu_rotation, "")
+            messages.append("la rotación de video")
         if "visualizer" in dropped:
             messages.append("el visualizador de audio")
         if messages:
@@ -2642,6 +2646,18 @@ class MainWindow(QMainWindow):
         self.player.set_crop(ratio)
         self._check_menu_value(self.menu_crop, ratio)
         self._show_osd(f"Recorte: {choice_label(CROP_RATIOS, ratio)}")
+
+    def _set_rotation(self, rotation: str, announce: bool = True):
+        """Video > Rotar / voltear (4.13): opcion de instancia, como el passthrough."""
+        self._check_menu_value(self.menu_rotation, rotation)
+        if rotation == self.player.get_rotation():
+            return
+        self.player.set_rotation(rotation)
+        if self.current_index != -1:
+            self.player.reload_preserving_state()
+        self._report_dropped_options()
+        if announce:
+            self._show_osd(f"Rotación: {choice_label(ROTATIONS, rotation)}")
 
     def _cycle_choice(self, choices, setter, current):
         setter(next_choice(choices, current))

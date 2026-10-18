@@ -24,6 +24,9 @@ from .settings import (  # "any" = decodificacion por hardware automatica
     MAX_VOLUME,
     VideoAdjustSettings,
 )
+from .video_options import ROTATIONS
+
+ROTATION_VALUES = tuple(value for _label, value in ROTATIONS if value)
 
 BASE_VLC_ARGS = [
     "--no-video-title-show",
@@ -158,6 +161,18 @@ def passthrough_instance_args(mode: str, platform: str = sys.platform) -> list:
     return ["--spdif"]
 
 
+def rotation_instance_args(rotation: str) -> list:
+    """Video > Rotar / voltear (4.13): el filtro transform de libVLC. Es opcion de
+    instancia (--video-filter por Media se ignora, como audio-filter). Verificado con
+    libVLC 3.0.23 y la salida Direct3D11 embebida: con decodificacion por GPU el
+    filtro recibe los cuadros via una conversion a I420, y a 90/270 grados la ventana
+    muestra el video vertical con su forma correcta (la captura de pantalla de libVLC,
+    en cambio, sale al tamano original del video)."""
+    if rotation not in ROTATION_VALUES:
+        return []
+    return ["--video-filter=transform", f"--transform-type={rotation}"]
+
+
 def create_instance_with_fallback(base_args, optional_groups, factory=None):
     """Intenta vlc.Instance(base + todos los grupos opcionales). Una opcion
     desconocida (p. ej. las de GPU en un VLC viejo) hace que vlc.Instance
@@ -237,6 +252,8 @@ class VLCPlayer:
         self._instance_gpu_args = []
         self._passthrough = "off"  # Audio > Passthrough (3.16)
         self._instance_passthrough_args = []
+        self._rotation = ""  # Video > Rotar / voltear (4.13)
+        self._instance_rotation_args = []
         # Reproducir en (3.14): un player.renderers.Renderer, o None = esta PC.
         self._renderer = None
         # Paginas de video ya resueltas por yt-dlp (3.15): URL de la pagina -> WebStream.
@@ -319,12 +336,17 @@ class VLCPlayer:
     def _passthrough_args(self) -> list:
         return passthrough_instance_args(self._passthrough)
 
+    def _rotation_args(self) -> list:
+        return rotation_instance_args(self._rotation)
+
     def _create_instance(self, visualizer: bool):
         self._release_instance()
         base = BASE_VLC_ARGS + [f"--sub-text-scale={self._subtitle_scale}"]
         gpu = self._gpu_args()
         passthrough = self._passthrough_args()
-        groups = [("gpu", gpu), ("passthrough", passthrough), ("visualizer", VISUALIZER_VLC_ARGS if visualizer else [])]
+        rotation = self._rotation_args()
+        groups = [("gpu", gpu), ("passthrough", passthrough), ("rotation", rotation),
+                  ("visualizer", VISUALIZER_VLC_ARGS if visualizer else [])]
         log.info("Creando vlc.Instance con %s + %s", base, [g for _n, g in groups if g])
         self.instance, dropped = create_instance_with_fallback(base, groups)
         if dropped:
@@ -337,6 +359,9 @@ class VLCPlayer:
         if "passthrough" in dropped:
             self._passthrough = "off"
             passthrough = []
+        if "rotation" in dropped:
+            self._rotation = ""
+            rotation = []
         if "visualizer" in dropped:
             visualizer = False
         self.media_player = self.instance.media_player_new()
@@ -346,6 +371,7 @@ class VLCPlayer:
         self._instance_subtitle_scale = self._subtitle_scale
         self._instance_gpu_args = gpu
         self._instance_passthrough_args = passthrough
+        self._instance_rotation_args = rotation
 
         self.media_player.audio_set_volume(self._volume)
         self.media_player.audio_set_mute(self._muted)
@@ -420,6 +446,7 @@ class VLCPlayer:
             or self._subtitle_scale != self._instance_subtitle_scale
             or self._gpu_args() != self._instance_gpu_args
             or self._passthrough_args() != self._instance_passthrough_args
+            or self._rotation_args() != self._instance_rotation_args
         )
 
     def load(self, path_or_url: str, enable_visualizer: bool = False, start_ms: int = 0):
@@ -906,6 +933,15 @@ class VLCPlayer:
 
     def get_audio_passthrough(self) -> str:
         return self._passthrough
+
+    # -- rotar / voltear (4.13) -------------------------------------------------
+    def set_rotation(self, rotation: str):
+        """"" (sin rotar), "90", "180", "270", "hflip" o "vflip". Como el passthrough:
+        se aplica en la proxima load() o con reload_preserving_state()."""
+        self._rotation = rotation if rotation in ROTATION_VALUES else ""
+
+    def get_rotation(self) -> str:
+        return self._rotation
 
     # -- reproducir en otro dispositivo (3.14) ---------------------------------
     def set_renderer(self, renderer) -> None:

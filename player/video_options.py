@@ -11,6 +11,11 @@ CROP_RATIOS = [
     ("Ninguno", ""), ("16:9", "16:9"), ("4:3", "4:3"), ("1:1", "1:1"), ("16:10", "16:10"),
     ("1,85:1", "185:100"), ("2,21:1", "221:100"), ("2,35:1", "235:100"), ("2,39:1", "239:100"), ("5:4", "5:4"),
 ]
+# Video -> Rotar / voltear (4.13): valores de --transform-type del filtro transform de libVLC.
+ROTATIONS = [
+    ("Sin rotar", ""), ("90° a la derecha", "90"), ("180°", "180"), ("90° a la izquierda", "270"),
+    ("Voltear horizontalmente", "hflip"), ("Voltear verticalmente", "vflip"),
+]
 DEINTERLACE_LABELS = [
     ("Automático", "auto"), ("Desactivado", "off"), ("Blend", "blend"), ("Bob", "bob"), ("Lineal", "linear"),
     ("X", "x"), ("Yadif", "yadif"), ("Yadif (2x)", "yadif2x"),
