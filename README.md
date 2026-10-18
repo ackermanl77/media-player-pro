@@ -133,7 +133,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   Reproducir/Pausa, Siguiente, Anterior y Detener (y los botones de
   auriculares Bluetooth) manejan el reproductor aunque su ventana no tenga el
   foco, y Windows muestra el título y los botones en el panel multimedia
-  (junto al volumen) y en la pantalla de bloqueo.
+  (junto al volumen) y en la pantalla de bloqueo. Al pasar el mouse por el
+  botón del programa en la barra de tareas, la vista previa tiene los botones
+  Anterior, Reproducir/Pausar y Siguiente.
 - Pantalla completa (doble clic sobre el video o tecla `F`). En pantalla
   completa siguen funcionando todos los atajos de los menús, la barra de
   estado se oculta (sus mensajes aparecen en el OSD), un controlador propio

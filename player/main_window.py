@@ -265,6 +265,13 @@ class MainWindow(QMainWindow):
 
         self.system_media = SystemMediaControls(self)
         self.system_media.pressed.connect(self.media_command)
+        # Anterior / Reproducir-Pausar / Siguiente bajo la miniatura de la barra de tareas (4.12).
+        from .taskbar_buttons import TaskbarButtons
+
+        self.taskbar_buttons = TaskbarButtons(lambda name: theme.make_icon(name, theme.taskbar_icon_color()), self)
+        if self.taskbar_buttons.available:
+            self.taskbar_buttons.attach(int(self.winId()))
+        self.taskbar_buttons.pressed.connect(self.media_command)
         self._refresh_icons()
         self.playlist.contentsChanged.connect(self._schedule_session_save)
         self.playlist.summaryChanged.connect(self.playlist_dock.setWindowTitle)
@@ -1207,6 +1214,19 @@ class MainWindow(QMainWindow):
         playing = self.player.media_player is not None and self.player.is_playing()
         self._set_action_icon(self.act_play_pause, "pause" if playing else "play")
         self._update_system_media_status(playing)
+        if getattr(self, "taskbar_buttons", None) is not None:
+            self.taskbar_buttons.set_state(playing, self.current_index != -1)
+
+    def nativeEvent(self, event_type, message):
+        """Mensajes de Windows para los botones de la miniatura de la barra de tareas (4.12)."""
+        buttons = getattr(self, "taskbar_buttons", None)
+        if buttons is not None and buttons.available and event_type == b"windows_generic_MSG":
+            import ctypes.wintypes
+
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+            if buttons.handle_message(msg.message, msg.wParam or 0):
+                return True, 0
+        return super().nativeEvent(event_type, message)
 
     def _update_system_media_status(self, playing: bool) -> None:
         controls = getattr(self, "system_media", None)
@@ -2811,6 +2831,8 @@ class MainWindow(QMainWindow):
         self._closed = True
         if getattr(self, "system_media", None) is not None:
             self.system_media.close()
+        if getattr(self, "taskbar_buttons", None) is not None:
+            self.taskbar_buttons.close()
         if getattr(self, "renderer_discovery", None) is not None:
             self.renderer_discovery.close()
         for worker in list(getattr(self, "_web_workers", ())):

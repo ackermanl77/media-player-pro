@@ -14,6 +14,8 @@ estandar de QStyle mezclados con botones de texto. Aqui:
   formatos de imagen, para no depender de que el empaquetado lo incluya.
 """
 
+import sys
+
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -158,6 +160,22 @@ def render_icon_pixmap(name: str, color: str, size: int = 24, dpr: float = 1.0) 
     painter.end()
     pixmap.setDevicePixelRatio(dpr)
     return pixmap
+
+
+def taskbar_icon_color() -> str:
+    """Color de los iconos de la miniatura de la barra de tareas: el tema de Windows
+    (no el de la app), porque la miniatura usa el fondo de la barra de tareas."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+                if winreg.QueryValueEx(key, "SystemUsesLightTheme")[0]:
+                    return "#202020"
+        except OSError:
+            pass
+    return "#FFFFFF"
 
 
 def make_icon(name: str, color: str) -> QIcon:

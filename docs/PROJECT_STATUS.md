@@ -190,7 +190,15 @@ manual interactiva del instalado ("Abrir con", reproducir).
   vez la misma pulsación llegada por los dos caminos (400 ms). Verificado con el administrador de
   sesiones de Windows (`GlobalSystemMediaTransportControlsSessionManager`): la sesión aparece con
   su título, pasa de Playing a Paused y desaparece al cerrar. Pruebas: `tests/test_media_controls.py`.
-  Pendiente: los botones de la miniatura de la barra de tareas (ITaskbarList3).
+  **Botones de la miniatura (2026-10-18):** `player/taskbar_buttons.py` agrega Anterior,
+  Reproducir/Pausar y Siguiente bajo la vista previa de la barra de tareas con ITaskbarList3 por
+  ctypes (Qt 6 ya no trae QWinThumbnailToolBar): se agregan al llegar el mensaje registrado
+  `TaskbarButtonCreated` (también tras reiniciar Explorer), el de reproducir cambia de icono y
+  texto con el estado y se desactivan sin nada cargado; un clic llega como WM_COMMAND/THBN_CLICKED a
+  `MainWindow.nativeEvent()` y pasa por `media_command()`. Iconos con el color del tema de Windows
+  (`theme.taskbar_icon_color()`). Verificado en una ventana real de Windows 11: ThumbBarAddButtons y
+  ThumbBarUpdateButtons devuelven S_OK y un WM_COMMAND con THBN_CLICKED llega como comando. Pruebas:
+  `tests/test_taskbar_buttons.py`.
 
 - **Atajos editables (2026-10-17, 4.11).** Ayuda → Atajos de teclado (`player/shortcuts_dialog.py`)
   reasigna, quita o restaura el atajo de cualquier acción del registro (también las que no tenían
