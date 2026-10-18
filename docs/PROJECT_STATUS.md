@@ -22,7 +22,12 @@ BUNDLE_VLC=1, el libVLC recortado dentro del paquete)
 `MainWindow` (`player/main_window.py`) arma la ventana (barra de
 controles, menús, dock de la playlist) y traduce cada acción del usuario en
 llamadas a un único `VLCPlayer`; no importa `vlc` (lee el estado como
-`backend.PlaybackState`). Delega en módulos propios:
+`backend.PlaybackState`). Dos mixins le sacan código (6.6, 2026-10-18):
+`player/window_menus.py::MenusMixin` (acciones, menús, atajos fijos, menús
+contextuales y los que se rellenan al abrirse) y
+`player/window_dialogs.py::DialogsMixin` (abrir URL, listas M3U, marcadores,
+ir a un tiempo, subtítulos, capturas, ecualizador, ajustes de imagen,
+información del medio, Acerca de, carpeta de registros). Delega en módulos propios:
 
 - `player/actions.py::ActionRegistry`: cada comando es un `QAction` con id,
   texto, atajo y slot; el mismo objeto alimenta los menús, el menú
@@ -531,12 +536,9 @@ Detalle por archivo en
 - **El workflow de release nunca se ejecutó** (no se subió ninguna
   etiqueta desde que existe) y el instalado no se probó a mano ("Abrir
   con", reproducir); ver Release.
-- **`main_window.py` sigue siendo grande** (~2.400 líneas, el informe
-  apuntaba a ~400): ya están separados todos los módulos que listaba el
-  informe (acciones, lista modelo/vista + controlador, vista previa,
-  pantalla completa, widgets, ecualizador, energía, tema, escaneo de
-  carpetas...), pero `MainWindow` todavía arma los menús y cablea
-  transporte, pistas, subtítulos, A-B, marcadores y ajustes.
+- **`main_window.py` sigue siendo grande** (~2.100 líneas tras sacar menús y
+  diálogos a `window_menus.py`/`window_dialogs.py`, 6.6): `MainWindow` todavía
+  cablea transporte, pistas, subtítulos, A-B, marcadores y ajustes.
 - **Arrastrar para reordenar la lista no tiene prueba automática del
   gesto en sí** (Qt `offscreen` sin mouse simulado): se prueba el mismo
   camino que usa `dropEvent`; verificar a mano arrastrar una y varias
