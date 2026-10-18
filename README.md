@@ -110,7 +110,10 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   admite, se desmarcan solos con un aviso.
 - Tema **Sistema / Oscuro / Claro** (menú Ver) e iconos propios.
 - Menú contextual sobre el video (clic derecho) y **Ayuda → Atajos de
-  teclado** (`F1`), generado de los atajos reales.
+  teclado** (`F1`), generado de los atajos reales y **editable**: elige una
+  acción, pulsa la combinación nueva y «Asignar»; también «Quitar»,
+  «Predeterminado» y «Restaurar todos». Un atajo que ya usa otra acción no se
+  asigna (se avisa cuál). Se guardan en `settings.json`.
 - Pantalla completa (doble clic sobre el video o tecla `F`). En pantalla
   completa siguen funcionando todos los atajos de los menús, la barra de
   estado se oculta (sus mensajes aparecen en el OSD), un controlador propio

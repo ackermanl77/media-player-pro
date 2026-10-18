@@ -8,7 +8,11 @@ asi que texto, atajo y estado (marcado/no marcado) tienen una sola fuente.
 
 Los atajos que no son de un menu (flechas, teclas multimedia, Esc) son
 QShortcut registrados aqui con su descripcion, para que la ayuda los
-muestre igual."""
+muestre igual.
+
+Los atajos de las acciones se pueden cambiar (4.11, player/shortcuts_dialog.py):
+el registro recuerda el predeterminado de cada una, y overrides() / apply_overrides()
+llevan solo lo cambiado a settings.json (como texto portable, "" = sin atajo)."""
 
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMenu
@@ -20,6 +24,7 @@ class ActionRegistry:
     def __init__(self, owner):
         self._owner = owner
         self._actions = {}  # id -> QAction, en orden de registro
+        self._defaults = {}  # id -> QKeySequence predeterminado (vacio = sin atajo)
         self.extra_shortcuts = []  # (descripcion, QKeySequence) de los QShortcut
         # Filas fijas de la ayuda (raton, atajos que dependen del foco).
         self.static_rows = []
@@ -32,6 +37,7 @@ class ActionRegistry:
         action.setObjectName(action_id)
         if shortcut is not None:
             action.setShortcut(QKeySequence(shortcut))
+        self._defaults[action_id] = QKeySequence(action.shortcut())
         action.setCheckable(checkable)
         if tooltip:
             action.setToolTip(tooltip)
@@ -69,6 +75,66 @@ class ActionRegistry:
             else:
                 menu.addAction(self._actions[item])
         return menu
+
+    # -- atajos editables (4.11) -------------------------------------------------
+    def default_shortcut(self, action_id) -> QKeySequence:
+        return QKeySequence(self._defaults[action_id])
+
+    def is_customized(self, action_id) -> bool:
+        return self._actions[action_id].shortcut() != self._defaults[action_id]
+
+    def set_shortcut(self, action_id, sequence) -> None:
+        action = self._actions[action_id]
+        action.setShortcut(QKeySequence(sequence))
+        if not action.shortcut().isEmpty() and action not in self._owner.actions():
+            self._owner.addAction(action)  # ver register_shortcuts_on_owner()
+
+    def conflict(self, sequence, except_id=None):
+        """El texto de lo que ya usa `sequence` (otra accion o un atajo fijo), o None."""
+        sequence = QKeySequence(sequence)
+        if sequence.isEmpty():
+            return None
+        for action_id, action in self._actions.items():
+            if action_id != except_id and action.shortcut() == sequence:
+                return action.text().replace("&", "")
+        for description, fixed in self.extra_shortcuts:
+            if fixed == sequence:
+                return description
+        return None
+
+    def overrides(self) -> dict:
+        """{id: atajo} de las acciones cuyo atajo difiere del predeterminado
+        ("" = quitado), en formato portable (lo que se guarda en settings.json)."""
+        return {
+            action_id: action.shortcut().toString(QKeySequence.SequenceFormat.PortableText)
+            for action_id, action in self._actions.items()
+            if action.shortcut() != self._defaults[action_id]
+        }
+
+    def apply_overrides(self, overrides) -> list:
+        """Aplica los atajos guardados. Se ignoran ids que ya no existen, textos que
+        no son un atajo valido y los que chocan con otro (se devuelven sus ids)."""
+        skipped = []
+        for action_id, text in (overrides or {}).items():
+            if action_id not in self._actions or not isinstance(text, str):
+                skipped.append(action_id)
+                continue
+            sequence = QKeySequence(text, QKeySequence.SequenceFormat.PortableText)
+            # Unparsable text gives a sequence that prints as "" but isn't isEmpty() (it holds an
+            # invalid key), so the printed form is what tells a real shortcut from garbage.
+            if text and not sequence.toString(QKeySequence.SequenceFormat.PortableText):
+                skipped.append(action_id)
+                continue
+            if self.conflict(sequence, action_id):
+                skipped.append(action_id)
+                continue
+            self.set_shortcut(action_id, sequence)
+        return skipped
+
+    def reset_shortcuts(self) -> None:
+        for action_id, action in self._actions.items():
+            action.setShortcut(QKeySequence(self._defaults[action_id]))
+        self.register_shortcuts_on_owner()
 
     # -- atajos ----------------------------------------------------------------
     def add_shortcut(self, key, description, slot) -> QShortcut:

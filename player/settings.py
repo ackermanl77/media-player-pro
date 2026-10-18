@@ -120,6 +120,9 @@ class Settings:
     video_adjust: VideoAdjustSettings = field(default_factory=VideoAdjustSettings)
     audio_device: str = ""
     normalize_volume: bool = False
+    # Atajos cambiados por el usuario (4.11): id de accion -> atajo en texto
+    # portable de Qt ("" = sin atajo). Solo lo que difiere del predeterminado.
+    shortcuts: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -234,7 +237,23 @@ def settings_from_dict(raw) -> Settings:
     device = _str(raw.get("audio_device"))
     s.audio_device = device if len(device) <= 512 else ""
     s.normalize_volume = _bool(raw.get("normalize_volume"), s.normalize_volume)
+    s.shortcuts = _shortcuts_from_dict(raw.get("shortcuts"))
     return s
+
+
+MAX_SHORTCUT_OVERRIDES = 300
+
+
+def _shortcuts_from_dict(raw) -> dict:
+    """Solo pares id -> texto razonables; la ventana descarta despues los ids que
+    ya no existen y los atajos que no se pueden leer o que chocan."""
+    if not isinstance(raw, dict):
+        return {}
+    clean = {}
+    for key, value in list(raw.items())[:MAX_SHORTCUT_OVERRIDES]:
+        if isinstance(key, str) and key.isidentifier() and len(key) <= 64 and isinstance(value, str) and len(value) <= 64:
+            clean[key] = value
+    return clean
 
 
 def session_from_dict(raw) -> Session:

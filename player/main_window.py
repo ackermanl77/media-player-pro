@@ -17,23 +17,18 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPushButton,
     QSlider,
-    QTableWidget,
-    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -260,6 +255,8 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
+        # Atajos cambiados por el usuario (4.11), sobre los predeterminados ya registrados.
+        self.action_registry.apply_overrides(self.settings.shortcuts)
         self.action_registry.register_shortcuts_on_owner()
         self._refresh_icons()
         self.playlist.contentsChanged.connect(self._schedule_session_save)
@@ -381,6 +378,7 @@ class MainWindow(QMainWindow):
         s.video_adjust = self.player.get_video_adjust()
         s.audio_device = self.player.get_audio_device()
         s.normalize_volume = self.player.is_volume_normalized()
+        s.shortcuts = self.action_registry.overrides()
         return s
 
     def save_settings_now(self) -> bool:
@@ -1051,25 +1049,11 @@ class MainWindow(QMainWindow):
         return self.action_registry.shortcut_rows()
 
     def show_shortcuts_help(self):
-        dialog = QDialog(self)
+        """Ayuda -> Atajos de teclado: la tabla, editable (player/shortcuts_dialog.py)."""
+        from .shortcuts_dialog import ShortcutsDialog
+
+        dialog = ShortcutsDialog(self.action_registry, on_changed=self.save_settings_now, parent=self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.setWindowTitle("Atajos de teclado")
-        dialog.resize(520, 560)
-        layout = QVBoxLayout(dialog)
-        rows = self.shortcut_rows()
-        table = QTableWidget(len(rows), 2, dialog)
-        table.setHorizontalHeaderLabels(["Acción", "Atajo"])
-        table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        for row, (text, keys) in enumerate(rows):
-            table.setItem(row, 0, QTableWidgetItem(text))
-            table.setItem(row, 1, QTableWidgetItem(keys))
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(table)
-        close = QPushButton("Cerrar")
-        close.clicked.connect(dialog.accept)
-        layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
         self.shortcuts_dialog = dialog
         dialog.show()
 

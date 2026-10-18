@@ -142,6 +142,14 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Atajos editables (2026-10-17, 4.11).** Ayuda → Atajos de teclado (`player/shortcuts_dialog.py`)
+  reasigna, quita o restaura el atajo de cualquier acción del registro (también las que no tenían
+  uno); los fijos (QShortcut) se muestran en gris. `ActionRegistry` recuerda el predeterminado de
+  cada acción (`default_shortcut`, `is_customized`, `conflict`, `overrides`, `apply_overrides`,
+  `reset_shortcuts`); `Settings.shortcuts` guarda solo lo cambiado, en texto portable, y al
+  arrancar se descartan ids que ya no existen, textos ilegibles y choques. Pruebas:
+  `tests/test_shortcuts.py` (incluye guardar y reabrir la ventana real).
+
 - **Funciones de VLC que faltaban (informe 4.10, 2026-10-11).** Audio → Dispositivo de salida (lista de
   libVLC, se recuerda; uno desconectado se muestra como tal) y Normalizar volumen (normvol). Video →
   Relación de aspecto y Recortar (teclas `A`/`C` las recorren, con OSD), Desentrelazado (se recuerda;
