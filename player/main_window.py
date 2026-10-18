@@ -881,6 +881,15 @@ class MainWindow(QMainWindow):
             self.menu_on_finish.addAction(action)
 
         R.populate(menu_playback, [None, "add_bookmark", "show_bookmarks"])
+        # Reproducir en un Chromecast (3.14): la lista se busca al abrir el submenu.
+        from .renderers import RendererDiscovery
+
+        self.renderer_discovery = RendererDiscovery(self)
+        self.renderer_discovery.changed.connect(self._populate_renderer_menu)
+        self.menu_renderers = QMenu("Reproducir en", menu_playback)
+        self.menu_renderers.aboutToShow.connect(self._on_renderer_menu_shown)
+        menu_playback.addMenu(self.menu_renderers)
+        self._populate_renderer_menu()
 
         # -- Audio --  (A&udio: "&Archivo" ya usa Alt+A)
         menu_audio = menubar.addMenu("A&udio")
@@ -2438,6 +2447,47 @@ class MainWindow(QMainWindow):
         # proxima carga ya recrea el Instance con el tamano nuevo.
         self.player.reload_preserving_state()
 
+    # -- reproducir en otro dispositivo (3.14) ------------------------------------
+    def _on_renderer_menu_shown(self):
+        if not self.renderer_discovery.running and not self.renderer_discovery.start():
+            self.statusBar().showMessage("No se pudo buscar dispositivos en la red", 4000)
+        # Los dispositivos responden en unos segundos: la busqueda sigue un rato.
+        QTimer.singleShot(30_000, self.renderer_discovery.stop)
+        self._populate_renderer_menu()
+
+    def _populate_renderer_menu(self):
+        menu = self.menu_renderers
+        menu.clear()
+        current = self.player.get_renderer()
+        local = menu.addAction("Esta PC")
+        local.setCheckable(True)
+        local.setChecked(current is None)
+        local.triggered.connect(lambda _checked: self.cast_to(None))
+        renderers = self.renderer_discovery.renderers()
+        if renderers:
+            menu.addSeparator()
+        for renderer in renderers:
+            action = menu.addAction(renderer.name + ("" if renderer.can_video else " (solo audio)"))
+            action.setCheckable(True)
+            action.setChecked(current is not None and current.key == renderer.key)
+            action.triggered.connect(lambda _checked, r=renderer: self.cast_to(r))
+        if not renderers:
+            searching = menu.addAction("Buscando dispositivos (Chromecast)…" if self.renderer_discovery.running
+                                       else "Ningún dispositivo encontrado")
+            searching.setEnabled(False)
+
+    def cast_to(self, renderer):
+        """Envia la reproduccion a `renderer` (None = esta PC), siguiendo desde el mismo punto."""
+        if renderer is self.player.get_renderer() or (
+                renderer is not None and self.player.get_renderer() is not None
+                and renderer.key == self.player.get_renderer().key):
+            return
+        self.player.set_renderer(renderer)
+        if self.current_index != -1:
+            self.player.reload_preserving_state()
+        self._populate_renderer_menu()
+        self._show_osd(f"Reproduciendo en {renderer.name}" if renderer is not None else "Reproduciendo en esta PC")
+
     def _set_audio_passthrough(self, mode: str, announce: bool = True):
         for action in self.passthrough_group.actions():
             action.setChecked(action.data() == mode)
@@ -2696,6 +2746,8 @@ class MainWindow(QMainWindow):
         self._closed = True
         if getattr(self, "system_media", None) is not None:
             self.system_media.close()
+        if getattr(self, "renderer_discovery", None) is not None:
+            self.renderer_discovery.close()
         # Salir de pantalla completa antes de guardar: saveGeometry()/
         # saveState() en pantalla completa guardarian esa ventana (y el dock
         # oculto), y la proxima vez arrancaria asi.

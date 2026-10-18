@@ -142,6 +142,15 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Reproducir en un Chromecast (2026-10-17, 3.14).** `player/renderers.py`: el descubridor
+  `microdns_renderer` de libVLC 3 busca mientras se abre Reproducción → Reproducir en (y 30 s más);
+  `cast_to()` asigna el item con `libvlc_media_player_set_renderer` en cada `_set_media()` y recarga
+  el archivo desde el mismo punto. python-vlc declara el evento ItemAdded sin campos: el puntero
+  se lee de la unión del evento con ctypes y se retiene (hold) mientras está en la lista. Pruebas:
+  `tests/test_renderers.py` (lectura del puntero, retención/liberación, descubrimiento y
+  `set_renderer(None)` contra libVLC real, el menú). **No probado con un Chromecast real**: no hay
+  uno en la red de pruebas.
+
 - **Passthrough de audio (2026-10-17, 3.16).** Audio → Passthrough: Desactivado / AC3 y DTS / Todos
   los formatos. Opción de instancia como la mejora por GPU (`passthrough_instance_args()`:
   `--mmdevice-passthrough=1|2` en Windows, `--spdif` en otros sistemas; un grupo propio en

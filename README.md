@@ -114,6 +114,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   acción, pulsa la combinación nueva y «Asignar»; también «Quitar»,
   «Predeterminado» y «Restaurar todos». Un atajo que ya usa otra acción no se
   asigna (se avisa cuál). Se guardan en `settings.json`.
+- **Reproducción → Reproducir en**: busca Chromecast (y compatibles) en la
+  red local y envía la reproducción a uno, siguiendo desde el mismo punto;
+  «Esta PC» la trae de vuelta.
 - **Audio → Passthrough**: envía el audio comprimido sin decodificar (AC3 y
   DTS, o también E-AC3, TrueHD y DTS-HD) a un receptor o barra de sonido por
   HDMI/S/PDIF, si el dispositivo de salida lo admite.

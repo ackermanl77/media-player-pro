@@ -237,6 +237,8 @@ class VLCPlayer:
         self._instance_gpu_args = []
         self._passthrough = "off"  # Audio > Passthrough (3.16)
         self._instance_passthrough_args = []
+        # Reproducir en (3.14): un player.renderers.Renderer, o None = esta PC.
+        self._renderer = None
         # Grupos de opciones que libVLC rechazo en la ultima recreacion (ver
         # create_instance_with_fallback); la UI los lee con
         # take_dropped_options() para avisar y desmarcar el menu.
@@ -454,6 +456,13 @@ class VLCPlayer:
         self._media = media
         self._attach_media_events(media)
         self.media_player.set_media(media)
+        if self._renderer is not None:
+            # libVLC lo toma al empezar a reproducir: se asigna con cada archivo
+            # (y tras recrear el Instance, que crea otro MediaPlayer).
+            from .renderers import set_player_renderer
+
+            if not set_player_renderer(self.media_player, self._renderer):
+                log.warning("No se pudo enviar a %s", self._renderer.name)
 
     def _new_media(self, path_or_url: str):
         if is_url(path_or_url):
@@ -873,6 +882,14 @@ class VLCPlayer:
 
     def get_audio_passthrough(self) -> str:
         return self._passthrough
+
+    # -- reproducir en otro dispositivo (3.14) ---------------------------------
+    def set_renderer(self, renderer) -> None:
+        """Se aplica al cargar el proximo archivo; la ventana recarga el actual."""
+        self._renderer = renderer
+
+    def get_renderer(self):
+        return self._renderer
 
     # -- video -------------------------------------------------------------
     def set_video_scale(self, factor: float):
