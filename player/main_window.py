@@ -1627,6 +1627,11 @@ class MainWindow(QMainWindow):
         if self.bookmarks_dialog is not None:
             self.bookmarks_dialog.close()
             self.bookmarks_dialog = None
+        if self._needs_web_resolution(path):
+            # La pagina de un video (YouTube...): yt-dlp la resuelve en un hilo y
+            # despues se vuelve a llamar aqui (3.15).
+            self._resolve_web_video(index, path, user)
+            return
         # La posicion guardada va como :start-time del Media (ver
         # VLCPlayer.load): arranca directo ahi.
         saved_ms = 0 if is_url(path) else (get_saved_position_ms(path) or 0)
@@ -2447,6 +2452,50 @@ class MainWindow(QMainWindow):
         # proxima carga ya recrea el Instance con el tamano nuevo.
         self.player.reload_preserving_state()
 
+    # -- paginas de video con yt-dlp (3.15) -----------------------------------------
+    # Las URL de los streams caducan: una resolucion vale este tiempo.
+    WEB_STREAM_MAX_AGE_S = 3 * 3600
+
+    def _needs_web_resolution(self, path: str) -> bool:
+        from . import web_video
+
+        if not (is_url(path) and web_video.is_page_url(path) and web_video.available()):
+            return False
+        resolved_at = getattr(self, "_web_resolved_at", {}).get(path)
+        fresh = (self.player.web_stream(path) is not None and resolved_at is not None
+                 and time.monotonic() - resolved_at < self.WEB_STREAM_MAX_AGE_S)
+        return not fresh
+
+    def _resolve_web_video(self, index: int, path: str, user: bool) -> None:
+        from .web_video import ResolveWorker
+
+        self._stall_timer.stop()
+        self.player.stop()
+        self.statusBar().showMessage(f"Obteniendo el video de {self._display_name(path)}…")
+        self._show_osd("Obteniendo el video…")
+
+        def done(stream, _index=index, _path=path, _user=user):
+            self._web_workers.discard(worker)
+            self.player.set_web_stream(stream)
+            self._web_resolved_at = {**getattr(self, "_web_resolved_at", {}), _path: time.monotonic()}
+            if stream.title:
+                self.playlist.set_icy_title(_path, stream.title)
+            if self.current_index == _index and self.playlist.path(_index) == _path:
+                self.play_index(_index, user=_user)
+
+        def failed(message, _index=index, _path=path):
+            self._web_workers.discard(worker)
+            if self.current_index != _index or self.playlist.path(_index) != _path:
+                return
+            self.statusBar().showMessage(message, 8000)
+            self._show_osd("No se pudo abrir el video")
+            self.player.forget_web_stream(_path)
+
+        worker = ResolveWorker(path, done, failed)
+        self._web_workers = getattr(self, "_web_workers", set())
+        self._web_workers.add(worker)
+        worker.start()
+
     # -- reproducir en otro dispositivo (3.14) ------------------------------------
     def _on_renderer_menu_shown(self):
         if not self.renderer_discovery.running and not self.renderer_discovery.start():
@@ -2748,6 +2797,8 @@ class MainWindow(QMainWindow):
             self.system_media.close()
         if getattr(self, "renderer_discovery", None) is not None:
             self.renderer_discovery.close()
+        for worker in list(getattr(self, "_web_workers", ())):
+            worker.wait(2000)
         # Salir de pantalla completa antes de guardar: saveGeometry()/
         # saveState() en pantalla completa guardarian esa ventana (y el dock
         # oculto), y la proxima vez arrancaria asi.

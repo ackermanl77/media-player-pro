@@ -114,6 +114,11 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   acción, pulsa la combinación nueva y «Asignar»; también «Quitar»,
   «Predeterminado» y «Restaurar todos». Un atajo que ya usa otra acción no se
   asigna (se avisa cuál). Se guardan en `settings.json`.
+- **Videos de páginas web** (YouTube, Vimeo, Twitch, archive.org…): con
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp) instalado (`winget install
+  yt-dlp` o `pip install yt-dlp`; no se incluye con el programa), «Abrir URL»
+  con la página de un video lo reproduce hasta 1080p, con su título en la
+  lista. Sin yt-dlp, esas URL van directo a VLC como antes.
 - **Reproducción → Reproducir en**: busca Chromecast (y compatibles) en la
   red local y envía la reproducción a uno, siguiendo desde el mismo punto;
   «Esta PC» la trae de vuelta.

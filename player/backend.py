@@ -239,6 +239,8 @@ class VLCPlayer:
         self._instance_passthrough_args = []
         # Reproducir en (3.14): un player.renderers.Renderer, o None = esta PC.
         self._renderer = None
+        # Paginas de video ya resueltas por yt-dlp (3.15): URL de la pagina -> WebStream.
+        self._web_streams: dict = {}
         # Grupos de opciones que libVLC rechazo en la ultima recreacion (ver
         # create_instance_with_fallback); la UI los lee con
         # take_dropped_options() para avisar y desmarcar el menu.
@@ -464,7 +466,29 @@ class VLCPlayer:
             if not set_player_renderer(self.media_player, self._renderer):
                 log.warning("No se pudo enviar a %s", self._renderer.name)
 
+    def set_web_stream(self, stream) -> None:
+        """Los streams de una pagina (player.web_video.WebStream): la proxima load()
+        de stream.page_url reproduce estos (con el audio separado y sus cabeceras)."""
+        self._web_streams[stream.page_url] = stream
+
+    def web_stream(self, page_url: str):
+        return self._web_streams.get(page_url)
+
+    def forget_web_stream(self, page_url: str) -> None:
+        self._web_streams.pop(page_url, None)
+
     def _new_media(self, path_or_url: str):
+        stream = self._web_streams.get(path_or_url)
+        if stream is not None:
+            from .web_video import media_options
+
+            media = self.instance.media_new(stream.video_url)
+            media.add_option(f":network-caching={int(self.network_caching_ms)}")
+            for option in media_options(stream):
+                media.add_option(option)
+            if stream.title:
+                media.set_meta(vlc.Meta.Title, stream.title)
+            return media
         if is_url(path_or_url):
             media = self.instance.media_new(path_or_url)
             media.add_option(f":network-caching={int(self.network_caching_ms)}")

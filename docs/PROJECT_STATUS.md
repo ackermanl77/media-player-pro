@@ -142,6 +142,15 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Páginas de video con yt-dlp (2026-10-17, 3.15).** `player/web_video.py`: si yt-dlp está
+  (módulo `yt_dlp` o `yt-dlp.exe` en el PATH; no se incluye), la URL de un sitio de `KNOWN_SITES`
+  se resuelve en un hilo (`ResolveWorker`) al reproducirla: video ≤1080p y su audio aparte como
+  `:input-slave`, con las cabeceras que pide el sitio y el título en la lista. La lista guarda la
+  URL de la página (los streams caducan; una resolución vale 3 h). Una URL http sin extensión de
+  otro sitio (una radio) sigue yendo directo a libVLC. Probado con yt-dlp real y una página de
+  archive.org: se resolvió, se reprodujo con su duración real (6:10) y su título. Pruebas:
+  `tests/test_web_video.py` (sin red).
+
 - **Reproducir en un Chromecast (2026-10-17, 3.14).** `player/renderers.py`: el descubridor
   `microdns_renderer` de libVLC 3 busca mientras se abre Reproducción → Reproducir en (y 30 s más);
   `cast_to()` asigna el item con `libvlc_media_player_set_renderer` en cada `_set_media()` y recarga
