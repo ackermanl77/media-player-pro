@@ -24,8 +24,11 @@ from PySide6.QtCore import QLibraryInfo
 # version del .exe (Propiedades -> Detalles), ver packaging/version_resource.py.
 sys.path.insert(0, os.path.join(SPECPATH, "packaging"))
 from version_resource import build_version_info, read_version  # noqa: E402
+from windows_manifest import write_manifest  # noqa: E402
 
 APP_VERSION = read_version(SPECPATH)
+# 8.7: manifiesto con pagina de codigos UTF-8 y PerMonitorV2 (ver packaging/windows_manifest.py).
+MANIFEST_PATH = write_manifest(workpath)
 
 hiddenimports = ["player.backend", "player.main_window", "player.formats"]
 hiddenimports += collect_submodules("player")
@@ -137,8 +140,11 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="player/assets/icon.ico",
+    # Grupo 0: la app; 1 y 2: iconos de documento para archivos multimedia y
+    # listas, los DefaultIcon del instalador (packaging/document_icons.py).
+    icon=["player/assets/icon.ico", "player/assets/media_document.ico", "player/assets/playlist_document.ico"],
     version=build_version_info(APP_VERSION),
+    manifest=MANIFEST_PATH,
 )
 coll = COLLECT(
     exe,

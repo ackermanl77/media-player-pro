@@ -150,6 +150,37 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Línea de subtítulo anterior/siguiente (2026-10-20, 4.15).** Alt+Arriba / Alt+Abajo (Video →
+  Línea de subtítulo anterior/siguiente; Ctrl+Izquierda/Derecha ya eran pista anterior/siguiente):
+  saltan al inicio de la línea anterior o siguiente del subtítulo externo seleccionado (el último
+  cargado, `VLCPlayer.external_subtitles()`), contando el retardo de subtítulos. "Anterior" dentro
+  del primer segundo de una línea va a la previa; después, al inicio de la actual. libVLC 3 no da
+  los tiempos de las pistas SPU, así que `player/subtitle_cues.py` los lee del archivo (SRT, WebVTT,
+  ASS/SSA; MicroDVD `.sub` cuenta fotogramas y no se soporta), una vez por archivo (se relee si
+  cambia en disco). Con subtítulos incrustados o desactivados solo avisa en el OSD. Pruebas:
+  `tests/test_subtitle_cues.py`.
+
+- **Estadísticas de reproducción (2026-10-20, 4.14).** Tecla I (Video → Estadísticas de
+  reproducción y el menú contextual): un recuadro arriba a la izquierda del video
+  (`player/stats_overlay.py`, otra `OverlayWindow` como el OSD) que se actualiza cada segundo con
+  el codec, la resolución y los fps de la pista de video elegida, el formato de audio, las tasas de
+  entrada y demux (`libvlc_media_get_stats`, en bytes/µs como en VLC), los fotogramas mostrados,
+  perdidos y decodificados, los búferes de audio y los errores del demultiplexor
+  (`VLCPlayer.playback_stats()`). libVLC 3 no dice si la decodificación por hardware se activó de
+  verdad, así que se muestra el modo configurado, rotulado así. Comprobado con libVLC 3.0.23: la
+  tasa demux de `tests/assets/chapters.mkv` (29.797 bytes, 6 s) sale 36 kb/s. Pruebas:
+  `tests/test_stats_overlay.py`.
+
+- **Manifiesto e iconos de documento (2026-10-20, 8.7).** El .exe declara `activeCodePage` UTF-8 y
+  `dpiAwareness` PerMonitorV2 (`packaging/windows_manifest.py`; el único subprocess que lee texto
+  ya indica `encoding="utf-8"`) y lleva dos iconos de documento como grupos 1 y 2
+  (`player/assets/media_document.ico`, `playlist_document.ico`, dibujados con Qt por
+  `packaging/document_icons.py`, sin Pillow). El instalador usa `,1` para el ProgID
+  `ReproductorMultimediaPro.Media` y un ProgID nuevo `ReproductorMultimediaPro.Playlist` (`,2`)
+  para `.m3u`/`.m3u8`. El editor ya era "MELEJ", el mismo que en los demás proyectos. Comprobado en
+  un build real: tres grupos de iconos, el manifiesto con UTF-8 y PerMonitorV2, y `--self-test`
+  correcto. Pruebas: `tests/test_version.py`.
+
 - **Páginas de video con yt-dlp (2026-10-17, 3.15).** `player/web_video.py`: si yt-dlp está
   (módulo `yt_dlp` o `yt-dlp.exe` en el PATH; no se incluye), la URL de un sitio de `KNOWN_SITES`
   se resuelve en un hilo (`ResolveWorker`) al reproducirla: video ≤1080p y su audio aparte como
@@ -509,8 +540,8 @@ python -m pip install -r requirements-dev.txt
 $env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-**2026-10-11, Windows 11, Python 3.14, libVLC 3.0.23: 344 passed** (≈65 s; 335 el 2026-10-07, 319 el
-2026-10-03).
+**2026-10-20, Windows 11, Python 3.14, libVLC 3.0.23: 395 passed** (≈65 s; 344 el 2026-10-11, 335 el
+2026-10-07, 319 el 2026-10-03).
 En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
 con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
 `windows-latest` (Python 3.12 y 3.14, VLC instalado con `choco`); la última

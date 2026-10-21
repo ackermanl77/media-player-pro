@@ -62,6 +62,8 @@ from .settings import (
     save_session,
     save_settings,
 )
+from .stats_overlay import StatsOverlay
+from .subtitle_cues import adjacent_cue_time, load_cue_starts
 from .subtitle_dialog import wait_for_subtitle_jobs
 from .video_options import (
     ASPECT_RATIOS,
@@ -179,6 +181,7 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         # Subtitulos descargados para un archivo que ya no era el actual:
         # se cargan la proxima vez que se abra (ver _on_online_subtitle_ready).
         self._pending_subtitles = {}
+        self._subtitle_cue_cache = {}  # ruta -> (mtime, inicios de linea), ver seek_subtitle_line
         self._pending_track_restore = None
         self._pending_delay_restore = None  # (generacion, audio_ms, subtitulos_ms)
         self._stream_visualizer_gen = -1
@@ -457,6 +460,9 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         self._osd_label.setStyleSheet(theme.OSD_STYLE)
         self._osd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._osd_overlay.layout().addWidget(self._osd_label)
+        # Estadisticas de reproduccion (4.14, tecla I): otra superpuesta, arriba a la izquierda.
+        self.stats_overlay = StatsOverlay(
+            self, self.player, self._hw_decoding_label, self._video_frame_global_rect, self._overlays_allowed)
 
         self.controls_bar = self._build_controls_bar()
         self._enable_mouse_tracking_recursive(self.controls_bar)
@@ -1351,6 +1357,41 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         if self.current_index != -1 and self._current_chapters():
             self.player.previous_chapter()
 
+    def seek_subtitle_line(self, direction: int):
+        """Alt+Arriba/Abajo (4.15): al inicio de la linea anterior/siguiente
+        del subtitulo externo seleccionado (el ultimo cargado), teniendo en
+        cuenta el retardo de subtitulos. Las pistas incrustadas no sirven:
+        libVLC 3 no da sus tiempos."""
+        if self.current_index == -1:
+            return
+        externals = self.player.external_subtitles()
+        if not externals or self.player.get_current_subtitle_track() == -1:
+            self._show_osd("Solo con un subtítulo externo activo")
+            return
+        starts = self._subtitle_cue_starts(externals[-1])
+        if not starts:
+            self._show_osd("No se pudieron leer las líneas del subtítulo")
+            return
+        target = adjacent_cue_time(starts, self.player.get_time_ms(), direction,
+                                   self.player.get_subtitle_delay_ms())
+        if target is None:
+            self._show_osd("No hay más líneas" if direction > 0 else "Es la primera línea")
+            return
+        self._seek_to(target)
+
+    def _subtitle_cue_starts(self, path: str) -> list:
+        """Inicios de linea de `path`, leidos una vez por archivo (se vuelve
+        a leer si cambia en disco, p. ej. al descargar otra version)."""
+        try:
+            stamp = os.path.getmtime(path)
+        except OSError:
+            return []
+        cached = self._subtitle_cue_cache.get(path)
+        if cached is None or cached[0] != stamp:
+            cached = (stamp, load_cue_starts(path))
+            self._subtitle_cue_cache[path] = cached
+        return cached[1]
+
     # ------------------------------------------------------------ sliders
     def _on_slider_pressed(self):
         self.dragging_slider = True
@@ -1434,6 +1475,10 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         minimizada no deben aparecer solas sobre el escritorio."""
         return self.isVisible() and not self.isMinimized()
 
+    def _hw_decoding_label(self) -> str:
+        checked = self.hw_decoding_group.checkedAction() if hasattr(self, "hw_decoding_group") else None
+        return checked.text() if checked else "Automática"
+
     def _video_frame_global_rect(self) -> QRect:
         return QRect(self.video_frame.mapToGlobal(QPoint(0, 0)), self.video_frame.size())
 
@@ -1441,11 +1486,14 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         frame = self._video_frame_global_rect()
         hint = self._osd_label.sizeHint()
         self._osd_overlay.setGeometry(osd_rect(frame, hint.width(), hint.height()))
+        if hasattr(self, "stats_overlay"):
+            self.stats_overlay.reposition()
         if hasattr(self, "fullscreen"):
             self.fullscreen.reposition(frame)
 
     def _hide_overlays(self):
         self._osd_overlay.hide()
+        self.stats_overlay.hide()
         self.fullscreen.overlay.hide()
 
     def _on_application_state_changed(self, state):

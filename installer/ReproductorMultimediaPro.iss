@@ -62,18 +62,25 @@ Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"
 Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}\shell\enqueue"; ValueType: string; ValueData: "Agregar a la lista de {#AppName}"
 Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}\shell\enqueue\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --enqueue ""%1"""
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media"; ValueType: string; ValueData: "Archivo multimedia"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
+; Iconos de documento (8.7): grupos 1 y 2 del .exe (packaging/document_icons.py).
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},1"
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\enqueue"; ValueType: string; ValueData: "Agregar a la lista de {#AppName}"
 Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Media\shell\enqueue\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --enqueue ""%1"""
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Playlist"; ValueType: string; ValueData: "Lista de reproducción"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Playlist\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},2"
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Playlist\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Playlist\shell\enqueue"; ValueType: string; ValueData: "Agregar a la lista de {#AppName}"
+Root: HKCU; Subkey: "Software\Classes\{#AppKey}.Playlist\shell\enqueue\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --enqueue ""%1"""
 ; Clave padre de Capabilities: sin esto quedaba vacia tras desinstalar.
 Root: HKCU; Subkey: "Software\{#AppKey}"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\{#AppKey}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\{#AppKey}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Reproductor de música y video basado en libVLC"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppKey}\Capabilities"; Flags: uninsdeletevalue
-#define Ext(e) \
-  'Root: HKCU; Subkey: "Software\' + AppKey + '\Capabilities\FileAssociations"; ValueType: string; ValueName: "' + e + '"; ValueData: "' + AppKey + '.Media"' + NewLine + \
-  'Root: HKCU; Subkey: "Software\Classes\' + e + '\OpenWithProgids"; ValueType: string; ValueName: "' + AppKey + '.Media"; ValueData: ""; Flags: uninsdeletevalue' + NewLine + \
+; ProgId: "Media" (archivos multimedia) o "Playlist" (listas, con su propio icono).
+#define Ext(str e, str ProgId = "Media") \
+  'Root: HKCU; Subkey: "Software\' + AppKey + '\Capabilities\FileAssociations"; ValueType: string; ValueName: "' + e + '"; ValueData: "' + AppKey + '.' + ProgId + '"' + NewLine + \
+  'Root: HKCU; Subkey: "Software\Classes\' + e + '\OpenWithProgids"; ValueType: string; ValueName: "' + AppKey + '.' + ProgId + '"; ValueData: ""; Flags: uninsdeletevalue' + NewLine + \
   'Root: HKCU; Subkey: "Software\Classes\Applications\' + AppExe + '\SupportedTypes"; ValueType: string; ValueName: "' + e + '"; ValueData: ""'
 #emit Ext(".mp3")
 #emit Ext(".flac")
@@ -93,8 +100,8 @@ Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueN
 #emit Ext(".ts")
 #emit Ext(".m2ts")
 #emit Ext(".mpg")
-#emit Ext(".m3u")
-#emit Ext(".m3u8")
+#emit Ext(".m3u", "Playlist")
+#emit Ext(".m3u8", "Playlist")
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Abrir {#AppName}"; Flags: nowait postinstall skipifsilent

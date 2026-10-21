@@ -27,6 +27,11 @@ OSD_STYLE = (
     "background-color: rgba(0, 0, 0, 170); color: white; padding: 6px 16px;"
     "border-radius: 8px; font-size: 13pt;"
 )
+# Estadisticas (4.14): texto chico y monoespaciado, alineado a la izquierda.
+STATS_OVERLAY_STYLE = (
+    "background-color: rgba(0, 0, 0, 180); color: white; padding: 8px 12px;"
+    "border-radius: 6px; font-family: Consolas, 'Courier New', monospace; font-size: 9pt;"
+)
 PREVIEW_POPUP_STYLE = "background-color: black; border: 1px solid #888888;"
 PREVIEW_TIME_STYLE = "color: white; font-size: 9pt;"
 FULLSCREEN_CONTROLLER_STYLE = (

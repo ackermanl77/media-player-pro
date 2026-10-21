@@ -807,6 +807,25 @@ class VLCPlayer:
             "tracks": tracks,
         }
 
+    def playback_stats(self):
+        """Contadores en vivo para la superposicion de estadisticas (4.14):
+        {"stats": {campo de libvlc_media_stats_t: valor} o None si libVLC
+        todavia no los tiene, "tracks": pistas (vlc_internals.media_tracks),
+        "video_track"/"audio_track": ids seleccionados}, o None sin medio."""
+        media = self._media
+        if media is None or self._current_path is None:
+            return None
+        raw = vlc.MediaStats()
+        stats = None
+        if media.get_stats(raw):  # POINTER(MediaStats): ctypes pasa la direccion
+            stats = {name: getattr(raw, name) for name, _type in vlc.MediaStats._fields_}
+        return {
+            "stats": stats,
+            "tracks": vlc_internals.media_tracks(media),
+            "video_track": self.media_player.video_get_track(),
+            "audio_track": self.media_player.audio_get_track(),
+        }
+
     def get_audio_delay_ms(self) -> int:
         return self.media_player.audio_get_delay() // 1000
 
@@ -891,6 +910,11 @@ class VLCPlayer:
         self.media_player.video_set_subtitle_file(path)
         if path not in self._external_subtitles:
             self._external_subtitles.append(path)
+
+    def external_subtitles(self) -> list:
+        """Subtitulos externos del archivo actual, en orden de carga (el
+        ultimo es el que libVLC selecciono)."""
+        return list(self._external_subtitles)
 
     def add_subtitle_before_play(self, path: str):
         """Agrega un subtitulo externo al Media recien cargado, antes de

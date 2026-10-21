@@ -88,6 +88,10 @@ class MenusMixin:
         A("normal_speed", "Velocidad normal", lambda: self._set_rate(1.0), "=")
         self.act_prev_chapter = A("previous_chapter", "Capítulo anterior", self.previous_chapter, "PgUp")
         self.act_next_chapter = A("next_chapter", "Capítulo siguiente", self.next_chapter, "PgDown")
+        A("previous_subtitle_line", "Línea de subtítulo anterior", lambda: self.seek_subtitle_line(-1), "Alt+Up",
+          tooltip="Al inicio de la línea anterior del subtítulo externo (Alt+Arriba)")
+        A("next_subtitle_line", "Línea de subtítulo siguiente", lambda: self.seek_subtitle_line(1), "Alt+Down",
+          tooltip="Al inicio de la línea siguiente del subtítulo externo (Alt+Abajo)")
         A("add_bookmark", "Agregar marcador aquí", self.quick_add_bookmark, "B")
         A("show_bookmarks", "Ver marcadores...", self.show_bookmarks)
 
@@ -115,6 +119,9 @@ class MenusMixin:
         A("subtitle_sync_reset", "Restablecer sincronía de subtítulos", lambda: self._set_subtitle_delay(0))
         A("video_adjust", "Ajustes de video...", self.open_video_adjust, "Ctrl+E",
           tooltip="Brillo, contraste, saturación, tono y gamma")
+        self.act_stats_overlay = A("stats_overlay", "Estadísticas de reproducción", None, "I", checkable=True,
+                                   tooltip="Codec, resolución, tasa de bits y fotogramas perdidos sobre el video (I)")
+        self.act_stats_overlay.toggled.connect(lambda checked: self.stats_overlay.set_enabled(checked))
         A("media_info", "Información del medio...", self.show_media_info, "Ctrl+I",
           tooltip="Códecs, resolución, cuadros por segundo, canales, bitrate y etiquetas")
 
@@ -247,6 +254,7 @@ class MenusMixin:
             "fullscreen", "snapshot", "quick_snapshot", None,
             self.menu_subtitle_tracks, "load_subtitle", "search_subtitles",
             "subtitles_earlier", "subtitles_later", "subtitle_sync_reset",
+            "previous_subtitle_line", "next_subtitle_line",
         ])
 
         self.menu_sub_size = menu_video.addMenu("Tamaño de subtítulos")
@@ -281,7 +289,7 @@ class MenusMixin:
         self.menu_deinterlace = self._choice_menu(
             menu_video, "Desentrelazado", DEINTERLACE_LABELS, "auto", self._set_deinterlace)
         self.menu_rotation = self._choice_menu(menu_video, "Rotar / voltear", ROTATIONS, "", self._set_rotation)
-        R.populate(menu_video, ["video_adjust", None, "media_info"])
+        R.populate(menu_video, ["video_adjust", None, "media_info", "stats_overlay"])
 
         self.menu_gpu = None
         if sys.platform.startswith("win"):
@@ -311,7 +319,7 @@ class MenusMixin:
         self.video_context_menu = R.populate(QMenu(self), [
             "play_pause", "stop", "previous", "next", None, "fullscreen", None,
             self.menu_speed, self.menu_chapters, self.menu_audio_tracks, self.menu_subtitle_tracks,
-            self.menu_zoom, self.menu_aspect, self.menu_crop, None, "media_info", "always_on_top",
+            self.menu_zoom, self.menu_aspect, self.menu_crop, None, "media_info", "stats_overlay", "always_on_top",
         ])
 
     def _choice_menu(self, parent_menu, title, choices, default, on_choose):
