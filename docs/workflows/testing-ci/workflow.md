@@ -13,8 +13,10 @@ pip install -r requirements-dev.txt   # pytest y pytest-timeout (ya no estan en 
 python -m pytest -q
 ```
 
-Resultado actual (2026-10-03, Windows 11, Python 3.14, libVLC 3.0.23):
-**319 passed**. Las pruebas que construyen ventanas fijan ellas mismas
+Resultado actual (2026-10-22, Windows 11, Python 3.14, libVLC 3.0.23):
+**406 passed, 1 skipped** y una falla intermitente conocida
+(`test_visualizer.py::test_visualizer_enabled_produces_a_video_output_for_audio`,
+ver Known Issues en `docs/PROJECT_STATUS.md`). Las pruebas que construyen ventanas fijan ellas mismas
 `QT_QPA_PLATFORM=offscreen`.
 
 El CI agrega `--timeout=120` (pytest-timeout): una prueba colgada en libVLC
@@ -42,6 +44,9 @@ falla en vez de trabar el job.
 - `tests/test_folder_scan.py`: escaneo de carpetas en segundo plano
   (`player/folder_scan.py`): lotes en el orden de `scan_folder()`,
   cancelación y señales entregadas en el hilo de la UI.
+- `tests/test_competitor_features.py`: efectos de audio, tono y filtros de
+  video, discos, recursos compartidos, convertir (una conversión real a
+  MP3) y grabar (3.17-3.19, 4.17).
 - `tests/test_resume.py`, `test_bookmarks.py`, `test_recent_files.py`,
   `test_persistence.py`, `test_opensubtitles.py`: módulos puros (posición
   y pistas por archivo, marcadores, recientes, JSON atómico y `.m3u8`,

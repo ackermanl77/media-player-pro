@@ -89,6 +89,12 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
 - Ecualizador gráfico de 10 bandas más preamplificador (−20 a +20 dB, en
   **pasos de 0,1 dB**: cada banda tiene su slider y un campo numérico) con
   los presets de VLC (en español: Plano, Clásica, Rock, Pop, ...).
+- **Audio → Efectos**: **Modo nocturno** (compresor: sube lo bajo y baja
+  lo fuerte), **Ampliar estéreo** y **Auriculares: sonido envolvente
+  virtual**, combinables, y **Tono** de −6 a +6 semitonos sin cambiar la
+  velocidad (se recuerdan). **Video → Filtros**: Enfocar, Reducir ruido,
+  Suavizar bandas de color y Quitar bloques (posprocesado), también
+  combinables. Son los filtros que trae libVLC.
 - **Normalizar volumen** (Audio): baja solo los pasajes muy fuertes, en
   vivo y junto con el ecualizador. **Dispositivo de salida** (Audio): elegir
   por qué altavoces/auriculares suena (se recuerda).
@@ -114,6 +120,16 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   acción, pulsa la combinación nueva y «Asignar»; también «Quitar»,
   «Predeterminado» y «Restaurar todos». Un atajo que ya usa otra acción no se
   asigna (se avisa cuál). Se guardan en `settings.json`.
+- **Discos y red** (menú Archivo): **Abrir disco** (`Ctrl+D`: DVD, Blu-ray
+  con sus menús, o CD de audio, de una unidad; se puede elegir título), **Abrir carpeta
+  compartida** (SMB, NFS, SFTP o FTP; la contraseña solo se usa mientras el
+  programa está abierto, nunca se guarda) y **Explorar la red local**
+  (servidores UPnP/DLNA: carpetas y archivos que se agregan a la lista).
+- **Convertir / extraer audio** (`Ctrl+R`, menú Archivo): recodifica un
+  archivo a MP4 (H.264), MKV (H.265), MP3, Ogg o FLAC en segundo plano, con
+  progreso, sin cortar lo que suena. **Grabar** (`Shift+R`, menú
+  Reproducción): guarda lo que se reproduce (un stream en vivo, por ejemplo)
+  en un `.ts`, sin recodificar, en `Videos\Reproductor Multimedia Pro`.
 - **Videos de páginas web** (YouTube, Vimeo, Twitch, archive.org…): con
   [yt-dlp](https://github.com/yt-dlp/yt-dlp) instalado (`winget install
   yt-dlp` o `pip install yt-dlp`; no se incluye con el programa), «Abrir URL»
@@ -175,7 +191,11 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   `Ctrl+Shift+←/→` mueven A y B de a 0,1 s, y "Bucle entre marcadores"
   repite el tramo entre los marcadores que rodean la posición.
 - **Sincronía de subtítulos** ajustable en vivo (±50 ms, tecla `G`/`H`) y
-  **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande).
+  **tamaño de subtítulos** (Pequeño/Normal/Grande/Muy grande). `Alt+↑` /
+  `Alt+↓` saltan al inicio de la línea anterior / siguiente de un subtítulo
+  externo (para repetir una frase).
+- **Estadísticas de reproducción** (tecla `I`, menú Video): códec,
+  resolución, tasa de bits y fotogramas perdidos sobre el video.
 - **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo
   **"Siempre visible"** (encima de otras ventanas).
 - **Acción al terminar la lista** (menú Reproducción): Nada, Salir del
@@ -207,6 +227,8 @@ La lista completa está en Ayuda → Atajos de teclado (`F1`).
 | F / doble clic   | Pantalla completa          |
 | Esc              | Salir de pantalla completa |
 | Ctrl+O / Ctrl+U  | Abrir archivos / Abrir URL |
+| Ctrl+D           | Abrir disco                |
+| Ctrl+R / Shift+R | Convertir / Grabar         |
 | Ctrl+Flecha der./izq. | Pista siguiente / anterior |
 | Flecha der./izq. | Adelantar/retroceder 5 s   |
 | Mayús+Flecha     | ±1 s                       |
@@ -225,6 +247,8 @@ La lista completa está en Ayuda → Atajos de teclado (`F1`).
 | M                | Silenciar                  |
 | J / K            | Adelantar / retrasar audio 50 ms |
 | G / H            | Adelantar / retrasar subtítulos 50 ms |
+| Alt+Arriba / Alt+Abajo | Línea de subtítulo anterior / siguiente |
+| I                | Estadísticas de reproducción |
 | B                | Agregar marcador aquí      |
 | Ctrl+Shift+A / B / L | Marcar punto A / punto B / limpiar bucle A-B |
 | .                | Avanzar un fotograma (en pausa) |
@@ -244,6 +268,9 @@ python -m pytest -q
 
 `tests/conftest.py` redirige `Path.home()` y `%LOCALAPPDATA%` a carpetas
 temporales para todas las pruebas: la suite nunca toca tus ajustes reales.
+Última corrida (2026-10-22, Windows 11, Python 3.14, libVLC 3.0.23): 406
+passed, 1 skipped; `tests/test_visualizer.py::test_visualizer_enabled_produces_a_video_output_for_audio`
+falla de forma intermitente en esta máquina (ver docs/PROJECT_STATUS.md).
 `tests/test_formats.py` no depende de VLC ni de Qt. `tests/test_app_smoke.py`
 construye la ventana real (con la plataforma Qt `offscreen`, sin necesitar
 pantalla) y se omite automáticamente si no hay VLC instalado.

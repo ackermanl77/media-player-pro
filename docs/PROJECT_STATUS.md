@@ -30,7 +30,10 @@ ir a un tiempo, subtítulos, capturas, ecualizador, ajustes de imagen,
 información del medio, Acerca de, carpeta de registros) y
 `player/window_inputs.py::InputsMixin` (abrir archivos/carpeta, arrastrar y
 soltar, mensajes de otra instancia y el escaneo de carpetas en segundo
-plano). Delega en módulos propios:
+plano). Dos más desde 2026-10-21: `player/window_effects.py::EffectsMixin`
+(Audio → Efectos y Tono, Video → Filtros; 3.17/4.17) y
+`player/window_sources.py::SourcesMixin` (abrir disco, carpeta compartida,
+explorar la red, convertir y grabar; 3.18/3.19). Delega en módulos propios:
 
 - `player/actions.py::ActionRegistry`: cada comando es un `QAction` con id,
   texto, atajo y slot; el mismo objeto alimenta los menús, el menú
@@ -50,6 +53,12 @@ plano). Delega en módulos propios:
   `single_instance.py`, `inputs.py`, `vlc_check.py`.
 - `player/folder_scan.py::FolderScanWorker`: recorre "Abrir carpeta" en un
   `QThread` (lotes ordenados de `inputs.scan_folder_batches()`, cancelable).
+- `player/sources.py` (MRL de discos, unidades ópticas, URL de recursos
+  compartidos sin la contraseña) y `player/sources_dialog.py`
+  (`OpenDiscDialog`, `OpenShareDialog`, `NetworkBrowserDialog` sobre el
+  media discoverer `upnp` de libVLC).
+- `player/converter.py` (`PROFILES`, `transcode_sout()`, `record_sout()`,
+  `ConvertJob` en un `vlc.Instance` aparte) y `player/convert_dialog.py`.
 
 `VLCPlayer` (`player/backend.py`) es la única clase que toca `python-vlc`.
 Mantiene su propio `vlc.Instance`/`vlc.MediaPlayer`, y los **recrea** cuando
@@ -575,8 +584,10 @@ python -m pip install -r requirements-dev.txt
 $env:QT_QPA_PLATFORM="offscreen"; python -m pytest -q
 ```
 
-**2026-10-20, Windows 11, Python 3.14, libVLC 3.0.23: 395 passed** (≈65 s; 344 el 2026-10-11, 335 el
-2026-10-07, 319 el 2026-10-03).
+**2026-10-22, Windows 11, Python 3.14, libVLC 3.0.23: 406 passed, 1 skipped, 1 failed** (≈93 s; 395 el
+2026-10-20, 344 el 2026-10-11, 335 el 2026-10-07, 319 el 2026-10-03). La que falla es
+`test_visualizer.py::test_visualizer_enabled_produces_a_video_output_for_audio`, intermitente en esta
+máquina y también sin los cambios del 2026-10-21 (ver Known Issues).
 En GitHub Actions, `.github/workflows/ci.yml` corre `compileall` y la suite
 con `--timeout=120` en `ubuntu-latest` (Python 3.12, bajo `xvfb-run`) y en
 `windows-latest` (Python 3.12 y 3.14, VLC instalado con `choco`); la última
@@ -602,10 +613,17 @@ Detalle por archivo en
   Resolution / RTX Video HDR realmente se activan (requieren la GPU y el
   panel de NVIDIA; la plataforma `offscreen` de las pruebas no renderiza
   libVLC).
+- **`test_visualizer_enabled_produces_a_video_output_for_audio` falla de
+  forma intermitente** en esta máquina (la salida de video del visualizador
+  no aparece a tiempo); pasa a veces y falla igual sin los cambios recientes.
+- **Discos, recursos compartidos, UPnP y grabar** (3.18/3.19) están probados
+  con MRL/opciones y con conversiones reales de archivos, pero falta
+  probarlos a mano con un DVD/Blu-ray/CD real, un recurso SMB/NFS/SFTP real,
+  un servidor DLNA de la red y la grabación de un stream en vivo.
 - **El workflow de release nunca se ejecutó** (no se subió ninguna
   etiqueta desde que existe) y el instalado no se probó a mano ("Abrir
   con", reproducir); ver Release.
-- **`main_window.py` sigue siendo grande** (~1.900 líneas tras sacar menús,
+- **`main_window.py` sigue siendo grande** (~2.000 líneas tras sacar menús,
   diálogos y apertura de medios a `window_menus.py`/`window_dialogs.py`/
   `window_inputs.py`, 6.6): `MainWindow` todavía
   cablea transporte, pistas, subtítulos, A-B, marcadores y ajustes.
