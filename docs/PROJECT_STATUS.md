@@ -150,6 +150,41 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Efectos de audio (2026-10-21, 3.17).** Audio → Efectos: modo nocturno (el compresor de libVLC
+  con ratio 6 y umbral −24 dB, `NIGHT_MODE_ARGS`), ampliar estéreo (`stereo_widen`) y sonido
+  envolvente virtual para auriculares (`headphone_channel_mixer`), combinables, y Tono de −6 a +6
+  semitonos (`scaletempo_pitch`, `--pitch-shift`). La cadena "audio-filter" se fija en vivo como el
+  normalizador (`backend.audio_filter_chain()`); el tono y los parámetros del compresor son opciones
+  de instancia (`audio_effect_instance_args()`, grupo "audio_effects" que se descarta si libVLC lo
+  rechaza) y recargan conservando el estado. Se guardan en settings.json (`audio_effects`, `pitch`).
+
+- **Filtros de video (2026-10-21, 4.17).** Video → Filtros: enfocar (`sharpen`), reducir ruido
+  (`hqdn3d`), suavizar bandas (`gradfun`) y quitar bloques (`postproc`, calidad 6), combinables. Van
+  en la misma opción `--video-filter` que la rotación (`video_filter_instance_args()`: libVLC solo lee
+  la última), así que se aplican igual que ella. Se guardan (`video_filters`).
+
+- **Discos y red (2026-10-21, 3.18).** Archivo → Abrir disco (Ctrl+D: DVD con menús, Blu-ray, CD de
+  audio; las unidades de CD/DVD se listan con `GetDriveTypeW`), Abrir carpeta compartida (SMB, NFS,
+  SFTP, FTP; acepta `\\nas\carpeta`) y Explorar la red local (servidores UPnP/DLNA con el
+  descubrimiento "upnp" de libVLC, leído con un QTimer; abrir un servidor o carpeta la analiza con
+  red y muestra sus subitems). La contraseña de un recurso compartido **no** va en la URL: se pasa
+  como opción del Media (`:smb-pwd=`…, `sources.share_media_options()`) y vive solo en memoria
+  (`VLCPlayer.set_share_credentials()`), así que nunca llega a session.json ni a los recientes.
+  Comprobado con libVLC 3.0.23: acepta las opciones de credenciales y el descubrimiento arranca; en
+  esta red no había servidores DLNA, así que la navegación real queda sin probar.
+
+- **Convertir y grabar (2026-10-21, 3.19).** Archivo → Convertir / extraer audio (Ctrl+R): MP4
+  (H.264 + AAC), MKV (H.265 + AAC), MP3, Ogg Vorbis o FLAC con `stream_out_transcode` en un Instance
+  aparte (`player/converter.py`, `ConvertJob`), con progreso y Cancelar, sin cortar lo que suena; un
+  archivo local se convierte más rápido que en tiempo real (`tests/assets/chapters.mkv`, 6 s, en
+  menos de 1 s). Reproducción → Grabar (Shift+R): recarga lo que suena con
+  `#duplicate{dst=display,dst=std{access=file,mux=ts,...}}`, sin recodificar, en
+  `Videos\Reproductor Multimedia Pro\<título> <fecha>.ts`; se detiene al cambiar de pista.
+
+- **Sin hacer: identificar canción (4.18).** Necesita una clave de la API de AcoustID y una huella
+  Chromaprint: el módulo `stream_out_chromaprint` de libVLC no expone la huella por la API pública,
+  y `fpcalc` no está instalado. Queda pendiente hasta tener ambas.
+
 - **Línea de subtítulo anterior/siguiente (2026-10-20, 4.15).** Alt+Arriba / Alt+Abajo (Video →
   Línea de subtítulo anterior/siguiente; Ctrl+Izquierda/Derecha ya eran pista anterior/siguiente):
   saltan al inicio de la línea anterior o siguiente del subtítulo externo seleccionado (el último

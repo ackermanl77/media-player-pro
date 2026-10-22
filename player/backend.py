@@ -24,9 +24,13 @@ from .settings import (  # "any" = decodificacion por hardware automatica
     MAX_VOLUME,
     VideoAdjustSettings,
 )
-from .video_options import ROTATIONS
+from .video_options import AUDIO_EFFECT_VALUES, MAX_PITCH, MIN_PITCH, ROTATIONS, VIDEO_FILTER_VALUES
 
 ROTATION_VALUES = tuple(value for _label, value in ROTATIONS if value)
+# Modo nocturno (3.17): el compresor de libVLC mas fuerte que su default (ratio 2),
+# para que dialogos y explosiones queden a un volumen parecido.
+NIGHT_MODE_ARGS = ["--compressor-ratio=6", "--compressor-threshold=-24", "--compressor-makeup-gain=10",
+                   "--compressor-attack=10", "--compressor-release=200"]
 
 BASE_VLC_ARGS = [
     "--no-video-title-show",
@@ -173,6 +177,43 @@ def rotation_instance_args(rotation: str) -> list:
     return ["--video-filter=transform", f"--transform-type={rotation}"]
 
 
+def video_filter_instance_args(rotation: str, filters=()) -> list:
+    """Rotacion (4.13) y filtros de video (4.17) en UNA opcion --video-filter
+    (libVLC solo lee la ultima): transform primero y despues los filtros en el
+    orden de VIDEO_FILTERS. Opciones de instancia, como la rotacion."""
+    chain = (["transform"] if rotation in ROTATION_VALUES else []) + [f for f in VIDEO_FILTER_VALUES if f in filters]
+    if not chain:
+        return []
+    args = [f"--video-filter={':'.join(chain)}"]
+    if rotation in ROTATION_VALUES:
+        args.append(f"--transform-type={rotation}")
+    if "postproc" in filters:
+        args.append("--postproc-q=6")
+    return args
+
+
+def audio_effect_instance_args(effects=(), pitch: float = 0.0) -> list:
+    """Parametros de los efectos de audio (3.17) que libVLC solo lee al crear el
+    filtro: el tono de scaletempo_pitch y el compresor del modo nocturno. La
+    cadena de filtros en si se fija en vivo (vlc_internals.set_audio_filters)."""
+    args = []
+    if pitch:
+        args.append(f"--pitch-shift={float(pitch):g}")
+    if "compressor" in effects:
+        args += NIGHT_MODE_ARGS
+    return args
+
+
+def audio_filter_chain(equalizer: bool, normalize: bool, effects=(), pitch: float = 0.0) -> str:
+    """La cadena "audio-filter" del reproductor: ecualizador, normalizador, los
+    efectos de AUDIO_EFFECTS elegidos y, con el tono cambiado, scaletempo_pitch."""
+    chain = (["equalizer"] if equalizer else []) + (["normvol"] if normalize else [])
+    chain += [effect for effect in AUDIO_EFFECT_VALUES if effect in effects]
+    if pitch:
+        chain.append("scaletempo_pitch")
+    return ":".join(chain)
+
+
 def create_instance_with_fallback(base_args, optional_groups, factory=None):
     """Intenta vlc.Instance(base + todos los grupos opcionales). Una opcion
     desconocida (p. ej. las de GPU en un VLC viejo) hace que vlc.Instance
@@ -253,7 +294,14 @@ class VLCPlayer:
         self._passthrough = "off"  # Audio > Passthrough (3.16)
         self._instance_passthrough_args = []
         self._rotation = ""  # Video > Rotar / voltear (4.13)
+        self._video_filters: tuple = ()  # Video > Filtros (4.17)
         self._instance_rotation_args = []
+        self._audio_effects: tuple = ()  # Audio > Efectos (3.17)
+        self._pitch = 0.0
+        self._instance_audio_effect_args = []
+        self._record_path = None  # Reproduccion > Grabar (3.19)
+        # Recursos compartidos (3.18): "esquema://usuario@host" -> opciones del Media.
+        self._share_credentials: dict = {}
         # Reproducir en (3.14): un player.renderers.Renderer, o None = esta PC.
         self._renderer = None
         # Paginas de video ya resueltas por yt-dlp (3.15): URL de la pagina -> WebStream.
@@ -337,7 +385,10 @@ class VLCPlayer:
         return passthrough_instance_args(self._passthrough)
 
     def _rotation_args(self) -> list:
-        return rotation_instance_args(self._rotation)
+        return video_filter_instance_args(self._rotation, self._video_filters)
+
+    def _audio_effect_args(self) -> list:
+        return audio_effect_instance_args(self._audio_effects, self._pitch)
 
     def _create_instance(self, visualizer: bool):
         self._release_instance()
@@ -345,7 +396,8 @@ class VLCPlayer:
         gpu = self._gpu_args()
         passthrough = self._passthrough_args()
         rotation = self._rotation_args()
-        groups = [("gpu", gpu), ("passthrough", passthrough), ("rotation", rotation),
+        audio_effects = self._audio_effect_args()
+        groups = [("gpu", gpu), ("passthrough", passthrough), ("rotation", rotation), ("audio_effects", audio_effects),
                   ("visualizer", VISUALIZER_VLC_ARGS if visualizer else [])]
         log.info("Creando vlc.Instance con %s + %s", base, [g for _n, g in groups if g])
         self.instance, dropped = create_instance_with_fallback(base, groups)
@@ -361,7 +413,11 @@ class VLCPlayer:
             passthrough = []
         if "rotation" in dropped:
             self._rotation = ""
+            self._video_filters = ()
             rotation = []
+        if "audio_effects" in dropped:
+            self._audio_effects, self._pitch = (), 0.0
+            audio_effects = []
         if "visualizer" in dropped:
             visualizer = False
         self.media_player = self.instance.media_player_new()
@@ -372,6 +428,7 @@ class VLCPlayer:
         self._instance_gpu_args = gpu
         self._instance_passthrough_args = passthrough
         self._instance_rotation_args = rotation
+        self._instance_audio_effect_args = audio_effects
 
         self.media_player.audio_set_volume(self._volume)
         self.media_player.audio_set_mute(self._muted)
@@ -385,7 +442,7 @@ class VLCPlayer:
         self._apply_video_state()
         if self._audio_device:
             self.media_player.audio_output_device_set(None, self._audio_device)
-        if self._normalize:
+        if self._normalize or self._audio_effects or self._pitch:
             self._apply_audio_filters()
         if self._video_widget is not None:
             _attach_window(self.media_player, self._video_widget)
@@ -447,6 +504,7 @@ class VLCPlayer:
             or self._gpu_args() != self._instance_gpu_args
             or self._passthrough_args() != self._instance_passthrough_args
             or self._rotation_args() != self._instance_rotation_args
+            or self._audio_effect_args() != self._instance_audio_effect_args
         )
 
     def load(self, path_or_url: str, enable_visualizer: bool = False, start_ms: int = 0):
@@ -519,6 +577,9 @@ class VLCPlayer:
         if is_url(path_or_url):
             media = self.instance.media_new(path_or_url)
             media.add_option(f":network-caching={int(self.network_caching_ms)}")
+            for option in self._share_options(path_or_url):
+                media.add_option(option)
+            self._add_record_options(media)
             if self.rtsp_tcp and path_or_url.lower().startswith(("rtsp://", "rtsps://")):
                 media.add_option(":rtsp-tcp")
             return media
@@ -527,7 +588,39 @@ class VLCPlayer:
         # State.NothingSpecial para siempre, sin pasar nunca a
         # State.Error): normalizar a "\" antes de pasarlo. Rutas asi
         # llegan tipicamente por argumentos de linea de comandos.
-        return self.instance.media_new_path(os.path.normpath(path_or_url))
+        media = self.instance.media_new_path(os.path.normpath(path_or_url))
+        self._add_record_options(media)
+        return media
+
+    # -- grabar (3.19) -----------------------------------------------------------
+    def set_recording(self, path) -> None:
+        """Grabar lo que se reproduce en `path` (un .ts, sin recodificar), o dejar
+        de grabar con None. Se aplica en la proxima carga o con
+        reload_preserving_state(), como las opciones de instancia."""
+        self._record_path = path or None
+
+    def recording_path(self):
+        return self._record_path
+
+    def _add_record_options(self, media) -> None:
+        if self._record_path:
+            from .converter import record_sout
+
+            media.add_option(":sout=" + record_sout(self._record_path))
+            media.add_option(":sout-keep")
+
+    # -- recursos compartidos (3.18) ---------------------------------------------
+    def set_share_credentials(self, url: str, options: list) -> None:
+        """Credenciales (opciones del Media, sources.share_media_options) para todo
+        lo que se abra de ese servidor. Solo en memoria: no se guardan."""
+        from .sources import share_root
+
+        self._share_credentials[share_root(url)] = list(options)
+
+    def _share_options(self, url: str) -> list:
+        from .sources import share_root
+
+        return self._share_credentials.get(share_root(url), [])
 
     def reload_preserving_state(self, visualizer=None) -> bool:
         """Recrea el Instance (para aplicar opciones de instancia como
@@ -753,10 +846,40 @@ class VLCPlayer:
         return vlc_internals.audio_filters_supported()
 
     def _apply_audio_filters(self) -> bool:
-        chain = ":".join(
-            (["equalizer"] if self._equalizer is not None else []) + (["normvol"] if self._normalize else [])
-        )
+        chain = audio_filter_chain(self._equalizer is not None, self._normalize, self._audio_effects, self._pitch)
         return vlc_internals.set_audio_filters(self.media_player, chain)
+
+    # -- Audio > Efectos (3.17) -----------------------------------------------
+    def audio_effects_supported(self) -> bool:
+        return vlc_internals.audio_filters_supported()
+
+    def set_audio_effects(self, effects) -> bool:
+        """Activa los efectos elegidos de AUDIO_EFFECTS (en vivo). Devuelve True si
+        hace falta recargar (el modo nocturno lleva parametros de instancia)."""
+        effects = tuple(e for e in AUDIO_EFFECT_VALUES if e in effects)
+        if not self.audio_effects_supported():
+            self._audio_effects = ()
+            return False
+        before = self._audio_effect_args()
+        self._audio_effects = effects
+        self._apply_audio_filters()
+        return self._audio_effect_args() != before
+
+    def get_audio_effects(self) -> tuple:
+        return self._audio_effects
+
+    def set_pitch(self, semitones: float) -> bool:
+        """Tono en semitonos (0 = original). El valor es opcion de instancia
+        (--pitch-shift): se aplica en la proxima load() o con
+        reload_preserving_state(); devuelve True si cambio."""
+        value = round(max(MIN_PITCH, min(MAX_PITCH, float(semitones))), 1)
+        if not self.audio_effects_supported():
+            value = 0.0
+        changed, self._pitch = value != self._pitch, value
+        return changed
+
+    def get_pitch(self) -> float:
+        return self._pitch
 
     def set_volume_normalization(self, enabled: bool) -> bool:
         """Normalizador de volumen de VLC (normvol: baja los pasajes que
@@ -966,6 +1089,14 @@ class VLCPlayer:
 
     def get_rotation(self) -> str:
         return self._rotation
+
+    def set_video_filters(self, filters) -> None:
+        """Video > Filtros (4.17): los de VIDEO_FILTERS elegidos. Como la rotacion:
+        se aplica en la proxima load() o con reload_preserving_state()."""
+        self._video_filters = tuple(f for f in VIDEO_FILTER_VALUES if f in filters)
+
+    def get_video_filters(self) -> tuple:
+        return self._video_filters
 
     # -- reproducir en otro dispositivo (3.14) ---------------------------------
     def set_renderer(self, renderer) -> None:
@@ -1265,8 +1396,8 @@ class VLCPlayer:
 
     def _keep_normalizer(self):
         # set_equalizer deja la cadena de filtros en "equalizer" (o vacia):
-        # volver a agregar el normalizador.
-        if self._normalize:
+        # volver a agregar el normalizador y los efectos.
+        if self._normalize or self._audio_effects or self._pitch:
             self._apply_audio_filters()
 
 

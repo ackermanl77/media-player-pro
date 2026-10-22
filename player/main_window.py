@@ -85,6 +85,8 @@ from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist
     playlist_owns_key,
 )
 from .window_dialogs import DialogsMixin
+from .window_effects import EffectsMixin
+from .window_sources import SourcesMixin
 from .window_inputs import InputsMixin
 from .window_menus import AB_NUDGE_MS, REPEAT_LABELS, MenusMixin
 
@@ -136,7 +138,7 @@ class _ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 
-class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
+class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Reproductor Multimedia Pro")
@@ -332,6 +334,8 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         if s.normalize_volume and self.act_normalize_volume.isEnabled():
             self.act_normalize_volume.setChecked(True)
         self._set_audio_passthrough(s.audio_passthrough, announce=False)
+        self._restore_audio_effects(s.audio_effects, s.pitch)
+        self._restore_video_filters(s.video_filters)
         if s.geometry:
             self._restored_geometry = self.restoreGeometry(QByteArray.fromBase64(s.geometry.encode("ascii")))
         if s.window_state:
@@ -372,6 +376,9 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         s.normalize_volume = self.player.is_volume_normalized()
         s.shortcuts = self.action_registry.overrides()
         s.audio_passthrough = self.player.get_audio_passthrough()
+        s.audio_effects = list(self.player.get_audio_effects())
+        s.pitch = self.player.get_pitch()
+        s.video_filters = list(self.player.get_video_filters())
         return s
 
     def save_settings_now(self) -> bool:
@@ -939,6 +946,7 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
         if path is None:
             return
         self._save_current_position()
+        self._stop_recording_quietly()
         if user:
             self._consecutive_failures = 0
         self._set_current_index(index)
@@ -1815,7 +1823,8 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, QMainWindow):
             messages.append("el passthrough de audio")
         if "rotation" in dropped:
             self._check_menu_value(self.menu_rotation, "")
-            messages.append("la rotación de video")
+            messages.append("la rotación y los filtros de video")
+        messages += self._uncheck_dropped_effects(dropped)
         if "visualizer" in dropped:
             messages.append("el visualizador de audio")
         if messages:

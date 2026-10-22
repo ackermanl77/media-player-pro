@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .jsonstore import load_json, save_json
+from .video_options import AUDIO_EFFECT_VALUES, MAX_PITCH, MIN_PITCH, VIDEO_FILTER_VALUES
 
 MAX_VOLUME = 150
 REPEAT_MODES = ("none", "all", "one")
@@ -126,6 +127,10 @@ class Settings:
     # portable de Qt ("" = sin atajo). Solo lo que difiere del predeterminado.
     shortcuts: dict = field(default_factory=dict)
     audio_passthrough: str = "off"
+    # Audio > Efectos (3.17) y Video > Filtros (4.17): nombres de filtros de libVLC.
+    audio_effects: list = field(default_factory=list)
+    pitch: float = 0.0
+    video_filters: list = field(default_factory=list)
 
 
 @dataclass
@@ -173,6 +178,13 @@ def _db(value, default: float = 0.0) -> float:
     if num is None:
         return default
     return float(max(EQ_MIN_DB, min(EQ_MAX_DB, num)))
+
+
+def _names(value, allowed) -> list:
+    """Una lista de nombres de `allowed` (sin repetir, en el orden de `allowed`)."""
+    if not isinstance(value, list):
+        return []
+    return [name for name in allowed if name in value]
 
 
 def _str(value, default: str = "") -> str:
@@ -242,6 +254,11 @@ def settings_from_dict(raw) -> Settings:
     s.normalize_volume = _bool(raw.get("normalize_volume"), s.normalize_volume)
     s.shortcuts = _shortcuts_from_dict(raw.get("shortcuts"))
     s.audio_passthrough = _choice(raw.get("audio_passthrough"), PASSTHROUGH_MODES, s.audio_passthrough)
+    s.audio_effects = _names(raw.get("audio_effects"), AUDIO_EFFECT_VALUES)
+    s.video_filters = _names(raw.get("video_filters"), VIDEO_FILTER_VALUES)
+    pitch = raw.get("pitch")
+    if isinstance(pitch, (int, float)) and not isinstance(pitch, bool) and math.isfinite(pitch):
+        s.pitch = round(max(MIN_PITCH, min(MAX_PITCH, float(pitch))), 1)
     return s
 
 

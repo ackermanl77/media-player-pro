@@ -64,6 +64,14 @@ class MenusMixin:
         self.act_cancel_folder_scan = A("cancel_folder_scan", "Cancelar escaneo de carpeta", self.cancel_folder_scan)
         self.act_cancel_folder_scan.setEnabled(False)
         A("open_url", "Abrir URL...", self.open_url, "Ctrl+U")
+        A("open_disc", "Abrir disco (DVD, Blu-ray, CD)...", self.open_disc, "Ctrl+D")
+        A("open_share", "Abrir carpeta compartida (SMB, NFS, SFTP, FTP)...", self.open_share)
+        A("browse_network", "Explorar la red local (UPnP/DLNA)...", self.browse_network)
+        A("convert", "Convertir / extraer audio...", self.open_convert_dialog, "Ctrl+R",
+          tooltip="Recodifica un archivo a MP4, MKV, MP3, Ogg o FLAC sin cortar la reproducción")
+        self.act_record = A("record", "Grabar", None, "Shift+R", checkable=True,
+                            tooltip="Graba lo que se está reproduciendo (un stream en vivo, por ejemplo) en un .ts")
+        self.act_record.toggled.connect(self.toggle_recording)
         A("save_playlist", "Guardar lista (.m3u8)...", self.save_playlist)
         A("load_playlist", "Cargar lista...", self.load_playlist)
         self.act_restore_session = A(
@@ -147,8 +155,8 @@ class MenusMixin:
         self.menu_recent_files = QMenu("Abrir reciente", menu_file)
         self.menu_recent_files.aboutToShow.connect(self._populate_recent_files_menu)
         R.populate(menu_file, [
-            "open_files", "open_folder", "open_url", self.menu_recent_files, None,
-            "save_playlist", "load_playlist", "cancel_folder_scan", "restore_session",
+            "open_files", "open_folder", "open_url", "open_disc", "open_share", "browse_network", self.menu_recent_files, None,
+            "convert", None, "save_playlist", "load_playlist", "cancel_folder_scan", "restore_session",
             "allow_multiple_windows", None, "quit",
         ])
 
@@ -206,7 +214,7 @@ class MenusMixin:
             self.on_finish_group.addAction(action)
             self.menu_on_finish.addAction(action)
 
-        R.populate(menu_playback, [None, "add_bookmark", "show_bookmarks"])
+        R.populate(menu_playback, [None, "add_bookmark", "show_bookmarks", "record"])
         # Reproducir en un Chromecast (3.14): la lista se busca al abrir el submenu.
         from .renderers import RendererDiscovery
 
@@ -237,9 +245,10 @@ class MenusMixin:
                               "solo si el dispositivo de salida lo admite.")
             self.passthrough_group.addAction(action)
             action.triggered.connect(lambda _checked, m=mode: self._set_audio_passthrough(m))
+        self.menu_audio_effects = self._build_audio_effects_menu(menu_audio)
         R.populate(menu_audio, [
-            "mute", "equalizer", "visualizer", "normalize_volume", self.menu_audio_tracks, self.menu_audio_device,
-            self.menu_passthrough, None, "audio_earlier", "audio_later", "audio_sync_reset",
+            "mute", "equalizer", "visualizer", "normalize_volume", self.menu_audio_effects, self.menu_audio_tracks,
+            self.menu_audio_device, self.menu_passthrough, None, "audio_earlier", "audio_later", "audio_sync_reset",
         ])
         if not self.player.volume_normalization_supported():
             self.act_normalize_volume.setEnabled(False)
@@ -289,6 +298,8 @@ class MenusMixin:
         self.menu_deinterlace = self._choice_menu(
             menu_video, "Desentrelazado", DEINTERLACE_LABELS, "auto", self._set_deinterlace)
         self.menu_rotation = self._choice_menu(menu_video, "Rotar / voltear", ROTATIONS, "", self._set_rotation)
+        self.menu_video_filters = self._build_video_filters_menu(menu_video)
+        menu_video.addMenu(self.menu_video_filters)
         R.populate(menu_video, ["video_adjust", None, "media_info", "stats_overlay"])
 
         self.menu_gpu = None

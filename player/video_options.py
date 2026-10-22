@@ -16,6 +16,36 @@ ROTATIONS = [
     ("Sin rotar", ""), ("90° a la derecha", "90"), ("180°", "180"), ("90° a la izquierda", "270"),
     ("Voltear horizontalmente", "hflip"), ("Voltear verticalmente", "vflip"),
 ]
+# Video > Filtros (4.17): filtros de video de libVLC, en este orden en la cadena
+# --video-filter (despues de transform). Se pueden combinar.
+VIDEO_FILTERS = [
+    ("Enfocar", "sharpen"),
+    ("Reducir ruido", "hqdn3d"),
+    ("Suavizar bandas de color", "gradfun"),
+    ("Quitar bloques (posprocesado)", "postproc"),
+]
+VIDEO_FILTER_VALUES = tuple(value for _label, value in VIDEO_FILTERS)
+# Audio > Efectos (3.17): filtros de audio de libVLC, combinables, en este orden.
+AUDIO_EFFECTS = [
+    ("Modo nocturno (compresor)", "compressor"),
+    ("Ampliar estéreo", "stereo_widen"),
+    ("Auriculares: sonido envolvente virtual", "headphone_channel_mixer"),
+]
+AUDIO_EFFECT_VALUES = tuple(value for _label, value in AUDIO_EFFECTS)
+# Tono (scaletempo_pitch), en semitonos; 0 = sin cambio.
+PITCH_STEPS = (-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6)
+MIN_PITCH, MAX_PITCH = -12.0, 12.0
+
+
+def format_pitch(semitones: float) -> str:
+    if not semitones:
+        return "Original"
+    sign = "+" if semitones > 0 else "−"
+    value = abs(semitones)
+    text = f"{value:g}"
+    return f"{sign}{text} semitono{'s' if value != 1 else ''}"
+
+
 DEINTERLACE_LABELS = [
     ("Automático", "auto"), ("Desactivado", "off"), ("Blend", "blend"), ("Bob", "bob"), ("Lineal", "linear"),
     ("X", "x"), ("Yadif", "yadif"), ("Yadif (2x)", "yadif2x"),
