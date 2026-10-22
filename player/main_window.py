@@ -1877,8 +1877,23 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
 
     # ------------------------------------------------------------ tema
     def _apply_theme(self, key: str):
-        theme.apply_theme(QApplication.instance(), key)
+        app = QApplication.instance()
+        self._theme_key = theme.apply_theme(app, key)
         self._refresh_icons()
+        hints = app.styleHints()
+        if not getattr(self, "_follows_system_scheme", False) and hasattr(hints, "colorSchemeChanged"):
+            # "Sistema" follows the OS switching between light and dark while the app runs.
+            hints.colorSchemeChanged.connect(self._on_system_color_scheme_changed)
+            self._follows_system_scheme = True
+
+    def _on_system_color_scheme_changed(self, _scheme=None):
+        if getattr(self, "_theme_key", "system") != "system" or getattr(self, "_reapplying_theme", False):
+            return
+        self._reapplying_theme = True  # applying the theme can itself report a scheme change
+        try:
+            self._apply_theme("system")
+        finally:
+            self._reapplying_theme = False
 
     # ------------------------------------------------------------ fullscreen
     def toggle_fullscreen(self):

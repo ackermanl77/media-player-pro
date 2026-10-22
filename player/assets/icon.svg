@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Reproductor Multimedia Pro: a play disc with sound waves (purple tile). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9b6cff"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <circle cx="106" cy="128" r="66" fill="#ffffff"/>
+  <path d="M86 92 L142 128 L86 164 Z" fill="#6d28d9" stroke="#6d28d9" stroke-width="8" stroke-linejoin="round"/>
+  <g fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round">
+    <path d="M190 98 A44 44 0 0 1 190 158"/>
+    <path d="M212 76 A76 76 0 0 1 212 180"/>
+  </g>
+</svg>

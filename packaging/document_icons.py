@@ -5,7 +5,8 @@ renglones de lista y un triangulo de reproduccion (listas .m3u/.m3u8).
 El .spec los incrusta como segundo y tercer grupo de iconos del .exe, que el
 instalador usa como DefaultIcon (ReproductorMultimediaPro.exe,1 y ,2). Igual
 que player/assets/icon.ico, los .ico generados se versionan; regenerarlos es
-un paso de desarrollo:
+un paso de desarrollo (el dibujo original del icono es player/assets/icon.svg;
+icon.png e icon.ico se renderizan desde el):
 
     python packaging/document_icons.py
 

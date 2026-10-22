@@ -539,3 +539,22 @@ def test_input_scans_queue_instead_of_dropping_the_second(window, tmp_path):
     assert len(window._input_scan_queue) == 1  # waits for the first scan
     assert _pump(lambda: len(results) == 2)
     assert results == [[str(tmp_path / "one" / "one.wav")], [str(tmp_path / "two" / "two.wav")]]
+
+
+def test_system_theme_in_dark_mode_uses_a_dark_palette_with_readable_text(window, qapp, monkeypatch):
+    """UI1: the native Windows style kept white menu text in dark mode on its light standard
+    palette. In dark mode, "Sistema" now uses the explicit dark palette."""
+    from player import theme as theme_module
+
+    try:
+        monkeypatch.setattr(theme_module, "system_is_dark", lambda app: True)
+        window._apply_theme("system")
+        palette = qapp.palette()
+        assert palette.color(QPalette.ColorRole.Window).name() == "#1e1e1e"
+        assert palette.color(QPalette.ColorRole.WindowText).lightness() - palette.color(QPalette.ColorRole.Window).lightness() > 150
+        monkeypatch.setattr(theme_module, "system_is_dark", lambda app: False)
+        window._on_system_color_scheme_changed()
+        assert qapp.palette().color(QPalette.ColorRole.Window).lightness() > 150  # back to the light palette
+    finally:
+        monkeypatch.undo()
+        window._apply_theme("system")

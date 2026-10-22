@@ -6,8 +6,9 @@ enmarcando el video negro) con estilos sueltos en linea y los iconos
 estandar de QStyle mezclados con botones de texto. Aqui:
 
 - apply_theme(): "dark"/"light" usan Fusion con una paleta explicita
-  (igual en Windows 10 y 11); "system" vuelve al estilo nativo y deja que
-  Qt siga el modo claro/oscuro del sistema.
+  (igual en Windows 10 y 11); "system" sigue el modo del sistema: en modo
+  claro el estilo nativo, en modo oscuro la misma paleta oscura que "dark"
+  (el estilo nativo dejaba texto blanco sobre su paleta clara).
 - make_icon(): iconos SVG propios (dibujados para este proyecto, sin
   licencias de terceros), tenidos con el color de texto de la paleta
   activa. Se renderizan con QSvgRenderer (QtSvg), no con el plugin de
@@ -111,9 +112,22 @@ def apply_theme(app, theme: str) -> str:
     else:
         theme = "system"
         _set_color_scheme(app, Qt.ColorScheme.Unknown)
-        app.setStyle(_original["style"] or "Fusion")
-        app.setPalette(app.style().standardPalette())
+        if system_is_dark(app):
+            # The native Windows style keeps white menu text in dark mode while its standard
+            # palette is the light one: white on light grey (UI1). Dark mode gets the same
+            # explicit dark palette as "Oscuro".
+            app.setStyle("Fusion")
+            app.setPalette(dark_palette())
+        else:
+            app.setStyle(_original["style"] or "Fusion")
+            app.setPalette(app.style().standardPalette())
     return theme
+
+
+def system_is_dark(app) -> bool:
+    """Whether the operating system is in dark mode (Qt's colour scheme; unknown counts as light)."""
+    hints = app.styleHints()
+    return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
 
 def icon_color(widget=None) -> str:
