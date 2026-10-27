@@ -79,6 +79,7 @@ from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist
     MARKER_LOOP,
     OverlayWindow,
     PositionSlider,
+    TransportButton,
     VideoFrame,
     floating_controls_rect,
     osd_rect,
@@ -447,7 +448,8 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
 
-        self.video_frame = VideoFrame()
+        self.video_frame = VideoFrame(idle_logo=_icon_path("icon.png"))
+        self.video_frame.setAccessibleName("Área de vídeo")
         self.video_frame.setAutoFillBackground(True)
         palette = self.video_frame.palette()
         palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.black)
@@ -563,7 +565,7 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
             child.setMouseTracking(True)
 
     def _tool_button(self, action, accessible_name):
-        button = QToolButton()
+        button = TransportButton()
         button.setDefaultAction(action)
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setAutoRaise(True)
@@ -625,7 +627,7 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
 
         # Velocidad: boton compacto "1,0×" con su menu (mismo submenu que
         # Reproduccion -> Velocidad; se arma en _build_menu).
-        self.speed_button = QToolButton()
+        self.speed_button = TransportButton()
         self.speed_button.setText(format_rate(1.0))
         self.speed_button.setToolTip("Velocidad de reproducción ([ más lenta, ] más rápida, = normal)")
         self.speed_button.setAccessibleName("Velocidad de reproducción")
@@ -646,17 +648,12 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
 
         layout.addLayout(buttons_row)
 
-        # Ninguno de estos controles debe quedarse con el foco de teclado:
-        # si lo tuvieran, pulsar Espacio o las flechas activaría el propio
-        # widget en vez de disparar los atajos globales. Todos tienen su
-        # equivalente en un menu y/o atajo.
-        for w in (
-            self.btn_prev, self.btn_play, self.btn_stop, self.btn_next,
-            self.btn_mute, self.position_slider, self.volume_slider,
-            self.speed_button, self.btn_shuffle, self.btn_repeat, self.btn_ab_loop,
-            self.btn_fullscreen,
-        ):
-            w.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Solo con Tab (UI2): un clic no les da el foco, asi que Espacio y las
+        # flechas siguen disparando los atajos globales; quien usa el teclado
+        # los alcanza con Tab (los botones son TransportButton: Espacio/Intro
+        # los pulsan, con anillo de foco; las barras usan el de su estilo).
+        for slider in (self.position_slider, self.volume_slider):
+            slider.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         return bar
 
@@ -1536,6 +1533,8 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         """Refresco periodico de etiquetas y barra. Las transiciones (fin de
         pista, error, Playing, buffering) llegan por eventos de libVLC (ver
         _connect_player_events)."""
+        # Sin nada en curso VLC no dibuja: el area de video muestra el logo y como empezar (UI3).
+        self.video_frame.set_idle(self.player.media_player is None or self.player.is_idle())
         length = self.player.get_length_ms()
         time_ms = self.player.get_time_ms()
         live = self.player.is_live_stream()

@@ -75,7 +75,9 @@ def test_model_roles_marker_and_ids(qapp):
     model.append_paths([os.path.normpath("C:/fake/a.mp3"), "http://radio/x"])
     assert model.rowCount() == 2
     assert model.index(0).data(PATH_ROLE) == os.path.normpath("C:/fake/a.mp3")
-    assert model.index(0).data(Qt.ItemDataRole.ToolTipRole) == os.path.normpath("C:/fake/a.mp3")
+    tooltip = model.index(0).data(Qt.ItemDataRole.ToolTipRole)
+    assert tooltip.splitlines() == ["a.mp3", os.path.normpath("C:/fake")]  # the name first, then the folder
+    assert model.index(1).data(Qt.ItemDataRole.ToolTipRole) == "http://radio/x"
     assert model.index(0).data() == "🎵 a.mp3" and model.index(1).data() == "🌐 http://radio/x"
     assert [model.index(r).data(ITEM_ID_ROLE) for r in range(2)] == [0, 1]
     model.set_current_row(1)

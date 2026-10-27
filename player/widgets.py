@@ -4,7 +4,7 @@ las ventanas superpuestas, el controlador de pantalla completa y la lista
 de reproduccion reordenable."""
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -33,9 +33,37 @@ class VideoFrame(QFrame):
     wheelScrolled = Signal(int, object)
     contextMenuRequested = Signal(QPoint)
 
-    def __init__(self, parent=None):
+    # Lo que se ve en el area de video sin nada en curso (VLC no dibuja): el logo y como empezar.
+    IDLE_HINT = "Arrastra un archivo aquí o pulsa Ctrl+O"
+
+    def __init__(self, parent=None, idle_logo: str | None = None):
         super().__init__(parent)
         self._wheel_remainder = 0
+        self._idle = idle_logo is not None
+        self._idle_logo = QPixmap(idle_logo) if idle_logo else QPixmap()
+
+    def set_idle(self, idle: bool):
+        """Muestra u oculta el logo y la pista de inicio (sin reproduccion en curso)."""
+        idle = idle and not self._idle_logo.isNull()
+        if idle != self._idle:
+            self._idle = idle
+            self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._idle:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        side = max(48, min(112, self.height() // 4))
+        logo = self._idle_logo.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        top = (self.height() - side) // 2 - 16
+        painter.setOpacity(0.85)
+        painter.drawPixmap((self.width() - logo.width()) // 2, top, logo)
+        painter.setOpacity(1.0)
+        painter.setPen(Qt.GlobalColor.lightGray)
+        text_rect = QRect(0, top + side + 12, self.width(), 28)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.IDLE_HINT)
 
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
@@ -58,6 +86,33 @@ class VideoFrame(QFrame):
     def contextMenuEvent(self, event):
         self.contextMenuRequested.emit(event.globalPos())
         event.accept()
+
+
+class TransportButton(QToolButton):
+    """Boton de la barra de reproduccion que se alcanza con Tab (UI2): un clic no le da el foco, asi
+    que Espacio y las flechas siguen siendo los atajos globales; con el foco por teclado, Espacio o
+    Intro lo pulsan a el (en vez del atajo Espacio = reproducir/pausar), y se ve un anillo de foco."""
+
+    _KEYS = (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        # En el propio boton, no en la barra: una hoja de estilo en la barra envolveria tambien el
+        # estilo de las barras de posicion/volumen (y su prueba de clic).
+        self.setStyleSheet("TransportButton:focus { border: 2px solid palette(highlight); border-radius: 5px; }")
+
+    def event(self, event):
+        if event.type() == QEvent.Type.ShortcutOverride and event.key() in self._KEYS and not event.modifiers():
+            event.accept()
+            return True
+        return super().event(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.isAutoRepeat():
+            self.click()
+            return
+        super().keyPressEvent(event)
 
 
 class OverlayWindow(QWidget):

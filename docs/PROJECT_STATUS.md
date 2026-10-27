@@ -159,6 +159,15 @@ manual interactiva del instalado ("Abrir con", reproducir).
 
 ## Recently Added
 
+- **Auditoría de UI, UI2/UI3 (2026-10-24).** Los botones de la barra de reproducción son
+  `widgets.TransportButton`: foco solo con Tab (un clic sigue dejando Espacio y las flechas a los atajos
+  globales), anillo de foco propio (una hoja de estilo en la barra envolvía también el estilo de la barra
+  de posición: la prueba del clic en la barra se caía con una violación de acceso) y, con el foco,
+  Espacio/Intro reclamados con `ShortcutOverride`. Las barras de posición y volumen también toman el foco
+  con Tab. El área de video tiene nombre ("Área de vídeo") y, inactiva, pinta el logo y "Arrastra un
+  archivo aquí o pulsa Ctrl+O" (`VideoFrame.set_idle`, desde `update_ui`); la descripción emergente de la
+  lista es el nombre del archivo y luego su carpeta. `tests/test_ui_audit.py`.
+
 - **Efectos de audio (2026-10-21, 3.17).** Audio → Efectos: modo nocturno (el compresor de libVLC
   con ratio 6 y umbral −24 dB, `NIGHT_MODE_ARGS`), ampliar estéreo (`stereo_widen`) y sonido
   envolvente virtual para auriculares (`headphone_channel_mixer`), combinables, y Tono de −6 a +6

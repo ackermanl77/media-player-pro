@@ -63,7 +63,9 @@ class PlaylistModel(QAbstractListModel):
         if role == PATH_ROLE:
             return path
         if role == Qt.ItemDataRole.ToolTipRole:
-            return path
+            # La fila puede mostrar el titulo de las etiquetas ("Prueba"): primero el nombre del
+            # archivo, luego su carpeta.
+            return path if is_url(path) else f"{os.path.basename(path)}\n{os.path.dirname(path)}"
         if role == ITEM_ID_ROLE:
             return self._ids[row]
         if role == DURATION_ROLE:

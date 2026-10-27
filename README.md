@@ -161,6 +161,14 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   superpuesta que no leen) también van a la barra de estado y se envían como
   aviso accesible (Qt 6.8+), así NVDA/Narrador anuncian volumen, saltos,
   sincronía, A-B, etc.
+- **Teclado**: los botones de la barra de reproducción y las barras de
+  posición y volumen se alcanzan con `Tab` (un anillo marca el que tiene el
+  foco); `Espacio` o `Intro` pulsan el botón enfocado. Con el mouse no toman
+  el foco, así que `Espacio` y las flechas siguen siendo los atajos globales.
+- Sin nada en reproducción, el área de video muestra el logo y cómo empezar
+  (arrastrar un archivo o `Ctrl+O`). En la lista, la descripción emergente de
+  cada entrada muestra el nombre del archivo y su carpeta, aunque la fila
+  muestre el título de sus etiquetas.
 - Vista previa en miniatura al pasar el mouse por la barra (solo videos
   locales; en audio y streams muestra solo el tiempo), con caché.
 - **Recuerda los ajustes y la lista entre sesiones**: volumen, silencio,
