@@ -4,7 +4,7 @@ import sys
 from PySide6.QtCore import QLibraryInfo, QLocale, QObject, Qt, QTranslator, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from player import __version__
+from player import __version__, update_check
 from player.logs import install_exception_hooks, setup_logging
 
 log = logging.getLogger("player.run")
@@ -34,6 +34,16 @@ class _ErrorReporter(QObject):
         box.show()
         self._boxes.append(box)
         box.finished.connect(lambda _r, b=box: self._boxes.remove(b) if b in self._boxes else None)
+
+
+class _UpdateRelay(QObject):
+    """Lleva la versión nueva encontrada (en otro hilo) a la ventana, en el hilo de la UI."""
+
+    found = Signal(object)
+
+    def __init__(self, window):
+        super().__init__()
+        self.found.connect(window.show_update, Qt.ConnectionType.QueuedConnection)
 
 
 def split_args(argv):
@@ -129,6 +139,9 @@ def main():
     warning = version_warning(version)
     if warning:
         window.statusBar().showMessage(warning, 15000)
+    updates = _UpdateRelay(window)
+    # No hace nada hasta que player/update_check.py tenga un UPDATE_FEED_URL.
+    update_check.check_in_background(__version__, updates.found.emit)
 
     server = None
     if single:

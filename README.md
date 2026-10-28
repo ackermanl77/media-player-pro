@@ -332,6 +332,15 @@ conocidos e historial detallado de bugs encontrados y arreglados, ver
 usar cada cosa y cómo se verificó) en
 [docs/workflows/](docs/workflows/README.md).
 
+## Privacidad
+
+El reproductor no envía nada sobre lo que ves o escuchas. Se conecta a internet solo para lo
+que tú abres o pides: las URL y streams que abres; con yt-dlp instalado, la página de un video
+web; **Buscar subtítulos online** envía a api.opensubtitles.com el hash del archivo (o el
+texto que buscas), los idiomas y tu API key, que se guarda solo en
+`~/.reproductor_multimedia_pro/config.json`; y **Explorar la red** busca servidores DLNA/UPnP en
+tu red local. Una versión publicada puede activar la comprobación de actualizaciones: una vez por arranque descarga un pequeño archivo de versión del sitio de descargas y no envía más que el nombre y la versión de la app. No hay telemetría.
+
 ## Notas
 
 - Si al iniciar aparece un error indicando que no se encuentra `libvlc`, el

@@ -36,6 +36,15 @@ CI: `.github/workflows/ci.yml` (tests), `build-exe.yml`, and `release.yml` on a 
 - `test_visualizer_enabled_produces_a_video_output_for_audio` is a known intermittent failure on
   this machine (docs/PROJECT_STATUS.md, Known Issues); one failure of it alone is not a regression.
 
+## Releases and licensing
+
+- Third-party licenses live in `licenses/` (`THIRD_PARTY_NOTICES.txt`, kept by hand, with VLC's
+  source link); the installer ships them. Update it when a dependency or the bundled VLC changes.
+- `player/update_check.py` checks a JSON release feed once per launch. `UPDATE_FEED_URL` stays empty until
+  releases are published somewhere users can reach (the GitHub repository is private).
+- CI runs `pip-audit`; Dependabot opens weekly update PRs. A vulnerability with no fixed release
+  is ignored only with a comment saying why it doesn't apply.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

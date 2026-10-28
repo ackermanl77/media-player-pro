@@ -227,6 +227,18 @@ class DialogsMixin:
             "conocidos por VLC, incluyendo formatos poco comunes.",
         )
 
+    def show_update(self, info):
+        """Hay una versión nueva (player/update_check.py; run.py busca una vez al arrancar)."""
+        self.statusBar().showMessage(f"Reproductor Multimedia Pro {info.version} ya está disponible", 15000)
+        notes = f"\n\n{info.notes}" if info.notes else ""
+        answer = QMessageBox.question(
+            self, "Actualización disponible",
+            f"Ya está disponible Reproductor Multimedia Pro {info.version} (tienes la {__version__}).{notes}"
+            "\n\n¿Abrir la página de descarga?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl(info.url))
+
     def open_log_folder(self):
         folder = current_log_dir()
         try:
