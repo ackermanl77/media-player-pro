@@ -70,14 +70,20 @@ def test_items_are_held_once_listed_and_released(qapp):
 
 
 def test_discovery_runs_against_real_libvlc_and_renderers_can_be_unset(qapp):
-    # Chromecast discovery is libVLC's microdns_renderer module: Windows' VLC has it, some Linux
-    # VLC packages (CI's Ubuntu runner) don't. Without it there is nothing real to test here.
+    # Chromecast discovery is libVLC's microdns_renderer module, which needs multicast DNS: CI's
+    # Ubuntu runner has the module but can't start it. Where libVLC itself can't discover, there is
+    # nothing real to test here.
     probe = vlc.Instance(["--quiet"])
     try:
         module = probe.renderer_discoverer_new(DISCOVERY_SERVICE)
         if module is None:
             pytest.skip(f"this libVLC has no {DISCOVERY_SERVICE} module")
+        started = module.start() == 0
+        if started:
+            module.stop()
         module.release()
+        if not started:
+            pytest.skip(f"libVLC's {DISCOVERY_SERVICE} can't start here (no multicast DNS)")
     finally:
         probe.release()
     discovery = RendererDiscovery()
