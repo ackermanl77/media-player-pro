@@ -15,7 +15,13 @@ try:
 except (ImportError, OSError):  # python-vlc without libvlc raises OSError on import
     pytest.skip("VLC (libvlc) no esta instalado", allow_module_level=True)
 
-from player.renderers import Renderer, RendererDiscovery, event_item_pointer, set_player_renderer  # noqa: E402
+from player.renderers import (  # noqa: E402
+    DISCOVERY_SERVICE,
+    Renderer,
+    RendererDiscovery,
+    event_item_pointer,
+    set_player_renderer,
+)
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +70,16 @@ def test_items_are_held_once_listed_and_released(qapp):
 
 
 def test_discovery_runs_against_real_libvlc_and_renderers_can_be_unset(qapp):
+    # Chromecast discovery is libVLC's microdns_renderer module: Windows' VLC has it, some Linux
+    # VLC packages (CI's Ubuntu runner) don't. Without it there is nothing real to test here.
+    probe = vlc.Instance(["--quiet"])
+    try:
+        module = probe.renderer_discoverer_new(DISCOVERY_SERVICE)
+        if module is None:
+            pytest.skip(f"this libVLC has no {DISCOVERY_SERVICE} module")
+        module.release()
+    finally:
+        probe.release()
     discovery = RendererDiscovery()
     try:
         assert discovery.start() and discovery.running and discovery.start()  # idempotent
