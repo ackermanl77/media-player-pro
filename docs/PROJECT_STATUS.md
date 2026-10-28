@@ -49,7 +49,9 @@ explorar la red, convertir y grabar; 3.18/3.19). Delega en módulos propios:
   completa, controlador flotante, temporizador de inactividad y cursor.
 - `player/widgets.py` (área de video, barra con marcadores y franja de lo
   almacenado, ventanas superpuestas, controlador de pantalla completa),
-  `equalizer_dialog.py`, `power.py`, `theme.py`, `url_dialog.py`,
+  `equalizer_dialog.py`, `video_adjust_dialog.py` (brillo, contraste,
+  saturación, tono y gamma en vivo), `media_info_dialog.py` (Ctrl+I: pistas,
+  códecs y etiquetas), `power.py`, `theme.py`, `url_dialog.py`,
   `single_instance.py`, `inputs.py`, `vlc_check.py`.
 - `player/folder_scan.py::FolderScanWorker`: recorre "Abrir carpeta" en un
   `QThread` (lotes ordenados de `inputs.scan_folder_batches()`, cancelable).
