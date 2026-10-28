@@ -1,0 +1,237 @@
+<title>Diagnóstico Reproductor Multimedia Pro</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: una columna de lectura (~880px); bandas de tiles, tablas y listas con franja de severidad. */
+:root {
+  --bg: #f6f7f8; --surface: #ffffff; --fg: #17202a; --muted: #5b6672; --line: #dde2e7;
+  --accent: #0f6e78; --accent-soft: #e2f1f2;
+  --ok: #1d7a46; --ok-soft: #e3f3e9; --warn: #a55d00; --warn-soft: #fbf0df;
+  --bad: #b3261e; --bad-soft: #fbe5e3; --info: #4a5a6a; --info-soft: #e9edf1;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161b; --surface: #182027; --fg: #e6ebef; --muted: #98a4af; --line: #2a343d;
+  --accent: #5cc4cc; --accent-soft: #143338;
+  --ok: #6fd39a; --ok-soft: #15301f; --warn: #f0b45c; --warn-soft: #382a14;
+  --bad: #ff8a80; --bad-soft: #3d1c1a; --info: #a9b6c2; --info-soft: #222c35; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11161b; --surface: #182027; --fg: #e6ebef; --muted: #98a4af; --line: #2a343d;
+  --accent: #5cc4cc; --accent-soft: #143338;
+  --ok: #6fd39a; --ok-soft: #15301f; --warn: #f0b45c; --warn-soft: #382a14;
+  --bad: #ff8a80; --bad-soft: #3d1c1a; --info: #a9b6c2; --info-soft: #222c35; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 16px; line-height: 1.55; }
+.wrap { max-width: 880px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 44px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.1; }
+h2 { font-size: 1.45rem; }
+p { margin: 0; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+.eyebrow { font-family: var(--f-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.04em; }
+.lede { color: var(--muted); max-width: 65ch; font-size: 1.08rem; }
+header { display: flex; flex-direction: column; gap: 12px; }
+section { display: flex; flex-direction: column; gap: 16px; }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sec-head .eyebrow { margin: 0; }
+
+/* Tiles */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tile .num { font-family: var(--f-display); font-size: 2rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lbl { font-weight: 600; }
+.tile .sub { color: var(--muted); font-size: 0.88rem; }
+.tile.bad { border-color: var(--bad); background: var(--bad-soft); }
+.tile.bad .num { color: var(--bad); }
+.meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; display: flex; }
+.meter i { display: block; height: 100%; }
+
+/* Arquitectura */
+.arch { display: flex; flex-direction: column; gap: 0; }
+.layer { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.layer b { font-family: var(--f-display); font-weight: 600; font-size: 1.05rem; }
+.layer span { color: var(--muted); font-size: 0.92rem; }
+.arrow { text-align: center; color: var(--muted); font-family: var(--f-mono); line-height: 1; padding: 6px 0; }
+.side { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px; }
+.side div { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; font-size: 0.9rem; color: var(--muted); min-width: 0; }
+.side div b { color: var(--fg); font-family: var(--f-mono); font-weight: 600; font-size: 0.82rem; display: block; }
+
+/* Barras */
+.bars { display: flex; flex-direction: column; gap: 8px; }
+.bar { display: grid; grid-template-columns: 190px 1fr 56px; gap: 12px; align-items: center; }
+@media (max-width: 520px) { .bar { grid-template-columns: 1fr 48px; } .bar .track { grid-column: 1 / -1; grid-row: 2; } }
+.bar .name { font-family: var(--f-mono); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track { height: 14px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.track i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.track i.mw { background: var(--warn); }
+.bar .val { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-mono); font-size: 0.85rem; }
+.note { color: var(--muted); font-size: 0.93rem; max-width: 70ch; }
+
+/* Tabla */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 0.94rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td:last-child { color: var(--muted); }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+.p-ok { background: var(--ok-soft); color: var(--ok); }
+.p-warn { background: var(--warn-soft); color: var(--warn); }
+.p-bad { background: var(--bad-soft); color: var(--bad); }
+.p-info { background: var(--info-soft); color: var(--info); }
+
+/* Listas */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.two > section { min-width: 0; }
+ul.done { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+ul.done li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+ul.done li::before { content: "✓"; color: var(--ok); font-weight: 700; }
+ul.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+ul.issues li { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--sev); border-radius: 6px; padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+ul.issues .t { font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+ul.issues .d { color: var(--muted); font-size: 0.92rem; }
+.s-crit { --sev: var(--bad); } .s-high { --sev: var(--warn); } .s-med { --sev: var(--accent); } .s-low { --sev: var(--line); }
+.sev { font-family: var(--f-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--sev); }
+.s-low .sev { color: var(--muted); }
+
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 12px; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 36px 1fr; gap: 12px; }
+ol.steps li::before { content: counter(s); font-family: var(--f-display); font-weight: 700; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+ol.steps b { display: block; }
+ol.steps span { color: var(--muted); font-size: 0.94rem; }
+footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">player/ · pyproject.toml · docs/PROJECT_STATUS.md · gh run list — 2026‑10‑27</p>
+  <h1>Diagnóstico Reproductor Multimedia Pro</h1>
+  <p class="lede">Estado del reproductor de audio y video sobre libVLC y PySide6 (v0.2.0): qué funciona, qué falta verificar a mano, y por qué la red de seguridad automática lleva casi tres semanas apagada.</p>
+</header>
+
+<div class="tiles">
+  <div class="tile">
+    <span class="num">418 / 418</span>
+    <span class="lbl">Tests pasando en local</span>
+    <span class="sub">41 archivos · 75 s · Qt offscreen</span>
+    <div class="meter"><i style="width:100%;background:var(--ok)"></i></div>
+  </div>
+  <div class="tile bad">
+    <span class="num">9</span>
+    <span class="lbl">Runs de CI sin ejecutar</span>
+    <span class="sub">Desde el 8 oct · facturación de GitHub Actions</span>
+  </div>
+  <div class="tile">
+    <span class="num">10 100</span>
+    <span class="lbl">Líneas en player/</span>
+    <span class="sub">52 módulos · 4 980 en tests/</span>
+  </div>
+  <div class="tile">
+    <span class="num">71</span>
+    <span class="lbl">Commits</span>
+    <span class="sub">Desde el 16 sep · 16 en las últimas 2 semanas · 2 archivos sin commit</span>
+  </div>
+</div>
+
+<section>
+  <div class="sec-head"><h2>Arquitectura</h2><p class="eyebrow">4 capas · VLCPlayer es la única que toca python‑vlc</p></div>
+  <div class="arch">
+    <div class="layer"><b>run.py / run.pyw</b><span>Entradas: logs, autodiagnóstico, una sola instancia, argumentos</span></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><b>MainWindow + 5 mixins</b><span>main_window.py, window_menus, window_dialogs, window_inputs, window_effects, window_sources: 2 887 líneas en total</span></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><b>VLCPlayer (backend.py)</b><span>Envoltorio sobre python‑vlc; recrea Instance/MediaPlayer cuando cambian opciones de instancia y reaplica el estado</span></div>
+    <div class="arrow">↓</div>
+    <div class="layer"><b>libVLC 3.0 de 64 bits</b><span>El VLC instalado, o el recortado dentro del .exe con BUNDLE_VLC=1</span></div>
+  </div>
+  <div class="side">
+    <div><b>ActionRegistry</b>Un QAction por comando: menús, botones, atajos editables</div>
+    <div><b>PlaylistController</b>Modelo/vista Qt, filtro, orden aleatorio, sesión</div>
+    <div><b>PreviewController · FullscreenMode</b>Miniatura en la barra y controlador flotante</div>
+    <div><b>converter.ConvertJob</b>Transcodifica en un vlc.Instance aparte</div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>Composición del código</h2><p class="eyebrow">top 8 de 52 módulos, por líneas</p></div>
+  <div class="bars">
+    <div class="bar"><span class="name">main_window.py</span><span class="track"><i class="mw" style="width:100%"></i></span><span class="val">1 779</span></div>
+    <div class="bar"><span class="name">backend.py</span><span class="track"><i style="width:71.2%"></i></span><span class="val">1 267</span></div>
+    <div class="bar"><span class="name">window_menus.py</span><span class="track"><i style="width:30%"></i></span><span class="val">533</span></div>
+    <div class="bar"><span class="name">widgets.py</span><span class="track"><i style="width:19.6%"></i></span><span class="val">349</span></div>
+    <div class="bar"><span class="name">playlist_model.py</span><span class="track"><i style="width:19.3%"></i></span><span class="val">343</span></div>
+    <div class="bar"><span class="name">subtitle_dialog.py</span><span class="track"><i style="width:16.2%"></i></span><span class="val">289</span></div>
+    <div class="bar"><span class="name">settings.py</span><span class="track"><i style="width:14.4%"></i></span><span class="val">257</span></div>
+    <div class="bar"><span class="name">sources_dialog.py</span><span class="track"><i style="width:13.4%"></i></span><span class="val">239</span></div>
+  </div>
+  <p class="note">main_window.py tiene el 18 % del código de player/ aun después de sacar cinco mixins (6.6). Todavía cablea transporte, pistas, subtítulos, A‑B, marcadores y ajustes.</p>
+</section>
+
+<section>
+  <div class="sec-head"><h2>Matriz de funcionalidades</h2><p class="eyebrow">probado automáticamente vs. verificado a mano</p></div>
+  <div class="tbl"><table>
+    <thead><tr><th>Funcionalidad</th><th>Estado</th><th>Detalle</th></tr></thead>
+    <tbody>
+      <tr><td>Reproducción local y streams</td><td><span class="pill p-ok">Probada</span></td><td>Pruebas reales contra libVLC; eventos con número de generación, reconexión HTTP, watchdog de 15 s</td></tr>
+      <tr><td>Efectos de audio y tono</td><td><span class="pill p-ok">Probada</span></td><td>Modo nocturno, ampliar estéreo, envolvente para auriculares, tono ±6 semitonos (3.17)</td></tr>
+      <tr><td>Filtros de video y rotación</td><td><span class="pill p-ok">Probada</span></td><td>Enfocar, reducir ruido, suavizar bandas, quitar bloques; una sola cadena --video-filter (4.13, 4.17)</td></tr>
+      <tr><td>Subtítulos</td><td><span class="pill p-ok">Probada</span></td><td>OpenSubtitles (requests mockeado), línea anterior/siguiente para SRT, WebVTT y ASS (4.15)</td></tr>
+      <tr><td>Lista de reproducción</td><td><span class="pill p-warn">Parcial</span></td><td>Modelo, filtro y orden probados; el gesto de arrastrar para reordenar no tiene prueba automática</td></tr>
+      <tr><td>Convertir y grabar</td><td><span class="pill p-warn">Parcial</span></td><td>Conversión real de archivos probada; grabar un stream en vivo no; arreglo de limpieza de salida sin commit</td></tr>
+      <tr><td>Discos, SMB/NFS/SFTP y UPnP</td><td><span class="pill p-warn">Sin verificar</span></td><td>MRL y opciones probadas; falta un DVD/Blu‑ray/CD, un recurso compartido y un servidor DLNA reales</td></tr>
+      <tr><td>OSD y pantalla completa sobre el video</td><td><span class="pill p-warn">Sin verificar</span></td><td>Qt offscreen no renderiza libVLC; falta verlo con video real, varios monitores y DPI</td></tr>
+      <tr><td>RTX Video Super Resolution / HDR</td><td><span class="pill p-warn">Sin verificar</span></td><td>Las opciones se aceptan; que se activen requiere la GPU y el panel de NVIDIA</td></tr>
+      <tr><td>Franja de lo almacenado</td><td><span class="pill p-info">Aproximada</span></td><td>libVLC no expone los bytes descargados; se dibuja el llenado de :network-caching</td></tr>
+      <tr><td>Release e instalador</td><td><span class="pill p-bad">Nunca ejecutado</span></td><td>release.yml no corrió nunca; solo existe la etiqueta v0.1.0 y el instalado no se probó a mano</td></tr>
+      <tr><td>Identificar canción (4.18)</td><td><span class="pill p-info">No hecho</span></td><td>Falta una clave de AcoustID y fpcalc; libVLC no expone la huella Chromaprint</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<div class="two">
+  <section>
+    <h2>Resuelto recientemente</h2>
+    <ul class="done">
+      <li><span>Botones de transporte alcanzables con Tab sin robarle Espacio ni las flechas a los atajos globales (24 oct)</span></li>
+      <li><span>Una hoja de estilo en la barra provocaba una violación de acceso en la barra de posición</span></li>
+      <li><span>Tema Sistema ilegible con Windows en modo oscuro (22 oct)</span></li>
+      <li><span>MainWindow partida en cinco mixins: menús, diálogos, entradas, efectos y fuentes</span></li>
+      <li><span>Elegir un preset del ecualizador daba access violation y rompía cada cambio de banda</span></li>
+      <li><span>La ventana hija de libVLC se quedaba con el mouse y el teclado</span></li>
+    </ul>
+  </section>
+  <section>
+    <h2>Problemas abiertos</h2>
+    <ul class="issues">
+      <li class="s-crit"><span class="t"><span class="sev">Crítico</span>CI apagado desde el 8 de octubre</span><span class="d">Los 9 últimos pushes no arrancaron ningún job por facturación; Ubuntu y Python 3.12 no se prueban desde entonces</span></li>
+      <li class="s-high"><span class="t"><span class="sev">Alto</span>El release nunca se ejecutó</span><span class="d">release.yml depende del CI en verde; el .exe instalado no se probó con "Abrir con"</span></li>
+      <li class="s-high"><span class="t"><span class="sev">Alto</span>Verificación manual pendiente</span><span class="d">OSD encima del video, rueda y clic derecho, multi‑monitor, RTX VSR/HDR</span></li>
+      <li class="s-med"><span class="t"><span class="sev">Medio</span>Dos tests intermitentes</span><span class="d">El del visualizador (documentado) y test_reload_preserving_state_keeps_position_pause_delay_and_external_subs, que hoy falló una vez sin offscreen (Playing en lugar de Paused) y pasó en la siguiente corrida</span></li>
+      <li class="s-med"><span class="t"><span class="sev">Medio</span>main_window.py sigue grande</span><span class="d">1 779 líneas; 2 887 contando sus mixins</span></li>
+      <li class="s-low"><span class="t"><span class="sev">Bajo</span>Arreglo de converter.py sin commit</span><span class="d">No borrar un archivo que ya existía al fallar una conversión, más 6 casos de prueba nuevos</span></li>
+    </ul>
+  </section>
+</div>
+
+<section>
+  <div class="sec-head"><h2>Próximos pasos recomendados</h2><p class="eyebrow">en orden</p></div>
+  <ol class="steps">
+    <li><div><b>Restaurar GitHub Actions</b><span>Revisar Billing &amp; plans de la cuenta y volver a correr el CI del último commit: 9 pushes, incluidos efectos, discos y conversión, solo se probaron en esta máquina.</span></div></li>
+    <li><div><b>Commitear el arreglo de converter.py</b><span>Es pequeño y ya tiene pruebas; dejarlo suelto mezcla su diff con el próximo trabajo.</span></div></li>
+    <li><div><b>Hacer un primer release de prueba</b><span>Una etiqueta v0.2.0 ejercita por primera vez release.yml, el zip y el instalador; después, instalar y probar "Abrir con" a mano.</span></div></li>
+    <li><div><b>Una sesión de verificación manual</b><span>Con un video real, un disco, un recurso SMB y un stream en vivo, siguiendo la lista de Known Issues.</span></div></li>
+    <li><div><b>Estabilizar los tests intermitentes</b><span>Una prueba que falla a veces enseña a ignorar fallos; esperar la salida de video o el estado Paused con un evento en lugar de un tiempo fijo.</span></div></li>
+    <li><div><b>Seguir partiendo MainWindow</b><span>Transporte, pistas y subtítulos son los siguientes candidatos a mixin o controlador.</span></div></li>
+  </ol>
+</section>
+
+<footer>Fuente: docs/PROJECT_STATUS.md, <span class="mono">pytest -q</span> en esta máquina (Windows 11, libVLC 3.0.23; 418 passed con offscreen, 417 + 1 fallo intermitente sin él), conteo de líneas de player/*.py y tests/*.py, <span class="mono">gh run list --workflow ci.yml</span> y <span class="mono">git log</span> — snapshot local del 27 oct 2026, incluye cambios sin commit.</footer>
+</div>

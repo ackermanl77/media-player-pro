@@ -180,6 +180,78 @@ def test_a_real_conversion_to_mp3(qapp, tmp_path):
     assert os.path.getsize(output) > 1000
 
 
+@pytest.mark.parametrize("failure", ["startup", "runtime", "cancel"])
+@pytest.mark.parametrize("destination_exists", [False, True])
+def test_failed_conversion_cleans_only_its_output(qapp, tmp_path, failure, destination_exists):
+    output = tmp_path / "out.mp3"
+    if destination_exists:
+        output.write_bytes(b"existing output")
+
+    class FakeMedia:
+        def add_option(self, option):
+            pass
+
+    class FakePlayer:
+        state = converter.vlc.State.Playing
+
+        def set_media(self, media):
+            pass
+
+        def play(self):
+            if not output.exists():
+                output.write_bytes(b"partial output")
+            return -1 if failure == "startup" else 0
+
+        def get_state(self):
+            return self.state
+
+        def stop(self):
+            pass
+
+        def release(self):
+            pass
+
+    class FakeInstance:
+        def __init__(self):
+            self.player = FakePlayer()
+
+        def media_new(self, source):
+            return FakeMedia()
+
+        def media_new_path(self, source):
+            return FakeMedia()
+
+        def media_player_new(self):
+            return self.player
+
+        def release(self):
+            pass
+
+    instance = FakeInstance()
+    job = converter.ConvertJob(
+        str(tmp_path / "input.mp4"),
+        str(output),
+        converter.PROFILES_BY_KEY["mp3"],
+        instance_factory=lambda: instance,
+    )
+    results = []
+    job.finished.connect(lambda ok, message: results.append((ok, message)))
+
+    started = job.start()
+    assert started is (failure != "startup")
+    if failure == "runtime":
+        instance.player.state = converter.vlc.State.Error
+        job._poll()
+    elif failure == "cancel":
+        job.cancel()
+
+    assert results and not results[0][0]
+    if destination_exists:
+        assert output.read_bytes() == b"existing output"
+    else:
+        assert not output.exists()
+
+
 def test_recording_adds_a_duplicate_sout_to_the_next_media(qapp):
     backend = _backend()
     player = backend.VLCPlayer()

@@ -94,6 +94,7 @@ class ConvertJob(QObject):
         self._media_options = list(media_options)
         self._instance = None
         self._player = None
+        self._output_existed_at_start = False
         self._timer = QTimer(self)
         self._timer.setInterval(self.POLL_MS)
         self._timer.timeout.connect(self._poll)
@@ -102,9 +103,10 @@ class ConvertJob(QObject):
     def start(self) -> bool:
         from .formats import is_url
 
+        self._output_existed_at_start = os.path.lexists(self.output_path)
         self._instance = self._factory()
         if self._instance is None:
-            self.finished.emit(False, "libVLC no pudo iniciarse")
+            self._finish(False, "libVLC no pudo iniciarse", remove_output=True)
             return False
         if is_url(self.source):
             media = self._instance.media_new(self.source)
@@ -118,7 +120,7 @@ class ConvertJob(QObject):
         self._player = self._instance.media_player_new()
         self._player.set_media(media)
         if self._player.play() != 0:
-            self._finish(False, "libVLC no pudo empezar la conversión")
+            self._finish(False, "libVLC no pudo empezar la conversión", remove_output=True)
             return False
         self.running = True
         self._timer.start()
@@ -133,7 +135,11 @@ class ConvertJob(QObject):
         state = self._player.get_state() if self._player is not None else vlc.State.Error
         if state == vlc.State.Ended:
             ok = os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0
-            self._finish(ok, self.output_path if ok else "La conversión no produjo ningún archivo")
+            self._finish(
+                ok,
+                self.output_path if ok else "La conversión no produjo ningún archivo",
+                remove_output=not ok,
+            )
         elif state == vlc.State.Error:
             self._finish(False, "libVLC no pudo convertir este archivo con ese formato", remove_output=True)
         else:
@@ -149,7 +155,7 @@ class ConvertJob(QObject):
         if self._instance is not None:
             self._instance.release()
             self._instance = None
-        if remove_output and os.path.exists(self.output_path):
+        if remove_output and not self._output_existed_at_start and os.path.exists(self.output_path):
             try:
                 os.remove(self.output_path)
             except OSError:

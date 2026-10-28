@@ -5,11 +5,14 @@ sin ninguno de los dos."""
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 
 import requests
 
 from . import __version__
+from .m3u import decode_playlist_bytes
+from .subtitle_cues import MAX_SUBTITLE_BYTES, parse_cues
 
 API_BASE = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = f"ReproductorMultimediaPro v{__version__}"
@@ -160,19 +163,74 @@ def request_download(api_key: str, file_id: int):
     return link, remaining, str(data.get("reset_time") or "")
 
 
+def _validate_subtitle_file(path: str, extension: str) -> None:
+    with open(path, "rb") as f:
+        content = f.read(MAX_SUBTITLE_BYTES + 1)
+    if not content or len(content) > MAX_SUBTITLE_BYTES or b"\x00" in content:
+        raise OpenSubtitlesError("La descarga del subtítulo está vacía o no es válida")
+
+    text = decode_playlist_bytes(content)
+    if extension in (".srt", ".vtt", ".ass", ".ssa"):
+        if extension == ".vtt" and not re.search(r"(?im)^\ufeff?WEBVTT(?:\s|$)", text):
+            raise OpenSubtitlesError("La descarga no tiene un encabezado WebVTT válido")
+        if not any(start < end for start, end in parse_cues(text, extension)):
+            raise OpenSubtitlesError("La descarga no contiene subtítulos válidos")
+    elif extension == ".sub":
+        if not re.search(r"(?m)^\s*\{\d+\}\{\d+\}.+", text):
+            raise OpenSubtitlesError("La descarga no contiene subtítulos MicroDVD válidos")
+    elif extension == ".smi":
+        if not re.search(r"(?is)<sami(?:\s|>)", text) or not re.search(r"(?is)<sync\b", text):
+            raise OpenSubtitlesError("La descarga no contiene subtítulos SAMI válidos")
+    elif extension not in SUBTITLE_EXTS:
+        raise OpenSubtitlesError("La extensión del subtítulo descargado no es válida")
+
+
 def download_subtitle_file(api_key: str, file_id: int, dest_path: str) -> DownloadResult:
     link, remaining, reset_time = request_download(api_key, file_id)
+    sub_resp = None
+    temp_path = None
     try:
-        sub_resp = requests.get(link, timeout=DOWNLOAD_TIMEOUT_S)
+        sub_resp = requests.get(link, timeout=DOWNLOAD_TIMEOUT_S, stream=True)
+        if sub_resp.status_code != 200:
+            raise OpenSubtitlesError(f"La descarga del subtítulo falló: {sub_resp.status_code}")
+
+        content_length = sub_resp.headers.get("Content-Length", "")
+        try:
+            declared_size = int(content_length)
+        except (TypeError, ValueError):
+            declared_size = 0
+        if declared_size > MAX_SUBTITLE_BYTES:
+            raise OpenSubtitlesError("El subtítulo descargado supera el tamaño máximo permitido")
+
+        dest_dir = os.path.dirname(os.path.abspath(dest_path))
+        prefix = f".{os.path.basename(dest_path)}."
+        fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".part", dir=dest_dir)
+        size = 0
+        with os.fdopen(fd, "wb") as f:
+            for chunk in sub_resp.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > MAX_SUBTITLE_BYTES:
+                    raise OpenSubtitlesError("El subtítulo descargado supera el tamaño máximo permitido")
+                f.write(chunk)
+
+        extension = os.path.splitext(dest_path)[1].lower()
+        _validate_subtitle_file(temp_path, extension)
+        os.replace(temp_path, dest_path)
+        temp_path = None
     except requests.RequestException as e:
         raise OpenSubtitlesError(f"Error de red al descargar el subtítulo: {e}") from e
-    if sub_resp.status_code != 200:
-        raise OpenSubtitlesError(f"La descarga del subtítulo falló: {sub_resp.status_code}")
-    try:
-        with open(dest_path, "wb") as f:
-            f.write(sub_resp.content)
     except OSError as e:
         raise OpenSubtitlesError(f"No se pudo guardar el subtítulo: {e}") from e
+    finally:
+        if sub_resp is not None:
+            sub_resp.close()
+        if temp_path is not None:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
     return DownloadResult(dest_path, remaining, reset_time)
 
 
