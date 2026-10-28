@@ -6,9 +6,13 @@ al construirse y al cerrarse (ver player/settings.py), y player/logs.py usa
 redirigen ambos, para todas las pruebas, a una carpeta temporal propia de
 cada prueba. (Las pruebas que ya parchean Path.home por su cuenta siguen
 funcionando: pathlib.Path es la misma clase en todos los modulos.)"""
+import os
 import pathlib
 
 import pytest
+
+# Nunca preguntar a GitHub por una versión nueva durante las pruebas (update_check.py).
+os.environ["REPRODUCTOR_UPDATE_FEED_URL"] = "off"
 
 
 @pytest.fixture(autouse=True)

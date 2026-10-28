@@ -13,7 +13,7 @@ Los cambios importantes de Reproductor Multimedia Pro. El formato sigue
   de la barra de tareas, rotar y voltear el video.
 - Videos de páginas web con yt-dlp (opcional), reproducir en Chromecast, passthrough de audio
   a un receptor, controles multimedia de Windows y atajos de teclado editables.
-- Comprobación de versión nueva, apagada hasta que se configure un feed de versiones.
+- Comprobación de versión nueva una vez por arranque, contra los GitHub Releases del proyecto (update.json).
 - Auditoría de dependencias (`pip-audit`) en CI y Dependabot.
 - Licencia MIT, `SECURITY.md` y una sección de privacidad en el README.
 

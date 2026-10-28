@@ -339,7 +339,7 @@ que tú abres o pides: las URL y streams que abres; con yt-dlp instalado, la pá
 web; **Buscar subtítulos online** envía a api.opensubtitles.com el hash del archivo (o el
 texto que buscas), los idiomas y tu API key, que se guarda solo en
 `~/.reproductor_multimedia_pro/config.json`; y **Explorar la red** busca servidores DLNA/UPnP en
-tu red local. Una versión publicada puede activar la comprobación de actualizaciones: una vez por arranque descarga un pequeño archivo de versión del sitio de descargas y no envía más que el nombre y la versión de la app. No hay telemetría.
+tu red local. Una vez por arranque la app busca una versión nueva: descarga un pequeño archivo de versión (update.json) de los GitHub Releases del proyecto y no envía más que el nombre y la versión de la app. Para apagarlo, pon la variable de entorno REPRODUCTOR_UPDATE_FEED_URL en off. No hay telemetría.
 
 ## Notas
 

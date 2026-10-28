@@ -40,8 +40,10 @@ CI: `.github/workflows/ci.yml` (tests), `build-exe.yml`, and `release.yml` on a 
 
 - Third-party licenses live in `licenses/` (`THIRD_PARTY_NOTICES.txt`, kept by hand, with VLC's
   source link); the installer ships them. Update it when a dependency or the bundled VLC changes.
-- `player/update_check.py` checks a JSON release feed once per launch. `UPDATE_FEED_URL` stays empty until
-  releases are published somewhere users can reach (the GitHub repository is private).
+- `player/update_check.py` checks `update.json` once per launch, at
+  `https://github.com/ackermanl77/media-player-pro/releases/latest/download/update.json`; every release
+  workflow attaches that file to its GitHub Release. Tests set `REPRODUCTOR_UPDATE_FEED_URL=off` so they never
+  reach the network.
 - CI runs `pip-audit`; Dependabot opens weekly update PRs. A vulnerability with no fixed release
   is ignored only with a comment saying why it doesn't apply.
 

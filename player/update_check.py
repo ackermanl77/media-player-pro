@@ -4,9 +4,11 @@ Cada versión publica un archivo así en un lugar al que los usuarios llegan:
 
     {"version": "0.3.0", "url": "https://example.com/descarga", "notes": "Qué cambió"}
 
-UPDATE_FEED_URL está vacío hasta que exista ese lugar (el repositorio de GitHub es
-privado), y mientras esté vacío la app nunca comprueba nada. Se pone al publicar una
-versión; la variable de entorno REPRODUCTOR_UPDATE_FEED_URL lo reemplaza (para probar un feed). Solo se
+UPDATE_FEED_URL es el update.json que cada workflow de release adjunta a su GitHub
+Release; la dirección releases/latest/download/ siempre lleva al más nuevo. Antes de la
+primera versión con ese archivo, la petición falla y la app no dice nada. La variable de
+entorno REPRODUCTOR_UPDATE_FEED_URL lo reemplaza (para probar un feed), y REPRODUCTOR_UPDATE_FEED_URL=off apaga la comprobación
+(las pruebas lo hacen). Solo se
 aceptan feeds y enlaces https, la respuesta se limita a 64 KB, y la petición no lleva más
 que un User-Agent con el nombre y la versión de la app: sin identificadores ni telemetría.
 """
@@ -21,7 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
-UPDATE_FEED_URL = ""
+UPDATE_FEED_URL = "https://github.com/ackermanl77/media-player-pro/releases/latest/download/update.json"
 ENV_VAR = "REPRODUCTOR_UPDATE_FEED_URL"
 APP_NAME = "ReproductorMultimediaPro"
 TIMEOUT_SECONDS = 5
@@ -38,8 +40,11 @@ class UpdateInfo:
 
 
 def feed_url() -> str:
-    """The configured feed, or "" when update checks are off."""
-    return (os.environ.get(ENV_VAR) or UPDATE_FEED_URL).strip()
+    """The configured feed, or "" when update checks are off (ENV_VAR set to "off")."""
+    override = os.environ.get(ENV_VAR, "").strip()
+    if override.lower() == "off":
+        return ""
+    return override or UPDATE_FEED_URL.strip()
 
 
 def parse_version(text: str) -> tuple[int, ...]:
