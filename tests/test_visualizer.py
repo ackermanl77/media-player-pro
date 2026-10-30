@@ -4,7 +4,7 @@ negro). Se omite si no hay VLC instalado."""
 import math
 import os
 import struct
-import time
+import threading
 import wave
 
 import pytest
@@ -49,19 +49,24 @@ def _headless_player(monkeypatch) -> VLCPlayer:
     return VLCPlayer()
 
 
-def _wait_until(predicate, timeout_s: float = 6.0, interval_s: float = 0.2) -> bool:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval_s)
-    return False
+def _watch_video_output(player: VLCPlayer):
+    ready = threading.Event()
+    event_manager = player.media_player.event_manager()
+
+    def on_video_output_changed(event):
+        if int(event.u.new_count) > 0:
+            ready.set()
+
+    if event_manager.event_attach(vlc.EventType.MediaPlayerVout, on_video_output_changed) != 0:
+        raise RuntimeError("no se pudo observar la salida de video de libVLC")
+    return ready, event_manager, on_video_output_changed
 
 
 @pytest.mark.xfail(
     os.environ.get("CI") == "true", strict=False,
     reason="Known intermittent failure (docs/PROJECT_STATUS.md, Known Issues): the visualizer's video "
-           "output sometimes appears too late. On CI it still runs, but a miss doesn't block a release.",
+           "output sometimes appears too late. Keep this until repeated CI runs confirm the event-based "
+           "readiness check is stable.",
 )
 def test_visualizer_enabled_produces_a_video_output_for_audio(tmp_path, monkeypatch):
     wav_path = str(tmp_path / "tone.wav")
@@ -71,16 +76,14 @@ def test_visualizer_enabled_produces_a_video_output_for_audio(tmp_path, monkeypa
     # corto puede terminar y desmontar el pipeline antes de que el vout
     # llegue a existir, dando un falso negativo.
     _make_test_wav(wav_path, duration=8.0)
-
     player = _headless_player(monkeypatch)
     player.load(wav_path, enable_visualizer=True)
-    player.play()
+    ready, event_manager, _callback = _watch_video_output(player)
     try:
-        # has_video() ademas exige tamaño > 0, que algunos modulos de vout
-        # headless no reportan aunque la salida este realmente activa; se
-        # comprueba has_vout() directamente.
-        assert _wait_until(player.has_active_video_output, timeout_s=12.0), "el visualizador no genero salida de video"
+        player.play()
+        assert ready.wait(12.0) and player.has_active_video_output(), "el visualizador no genero salida de video"
     finally:
+        event_manager.event_detach(vlc.EventType.MediaPlayerVout)
         player.stop()
 
 
@@ -90,10 +93,10 @@ def test_visualizer_disabled_stays_without_video_output(tmp_path, monkeypatch):
 
     player = _headless_player(monkeypatch)
     player.load(wav_path, enable_visualizer=False)
-    player.play()
+    ready, event_manager, _callback = _watch_video_output(player)
     try:
-        # Le damos tiempo de sobra: sin el filtro, un wav nunca deberia
-        # generar video.
-        assert not _wait_until(player.has_active_video_output, timeout_s=3.0)
+        player.play()
+        assert not ready.wait(3.0) and not player.has_active_video_output()
     finally:
+        event_manager.event_detach(vlc.EventType.MediaPlayerVout)
         player.stop()
