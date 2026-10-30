@@ -12,3 +12,6 @@ dist/
 .vscode/
 
 graphify-out/
+
+# Salida de comprobaciones manuales del visualizador (capturas, perfiles temporales)
+.visualizer-display-check*/
