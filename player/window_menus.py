@@ -13,7 +13,7 @@ from .backend import libvlc_version
 from .formats import format_rate, format_time, is_url
 from .recent_files import clear_recent_files, get_recent_files
 from .settings import RATE_STEP, REPEAT_MODES, SPEEDS
-from .video_options import ASPECT_RATIOS, CROP_RATIOS, DEINTERLACE_LABELS, ROTATIONS
+from .video_options import ASPECT_RATIOS, CROP_RATIOS, DEINTERLACE_LABELS, ROTATIONS, ZOOM_LEVELS
 
 AB_NUDGE_MS = 100         # paso para mover los puntos A/B
 REPEAT_LABELS = {"none": "No repetir", "all": "Repetir todo", "one": "Repetir uno"}
@@ -139,6 +139,11 @@ class MenusMixin:
                                     tooltip="En vez de la duración total (también con clic sobre ella)")
         self.act_always_on_top = A("always_on_top", "Siempre visible (encima de otras ventanas)", checkable=True)
         self.act_always_on_top.toggled.connect(self._on_always_on_top_toggled)
+        # Como la "Interfaz minima" de VLC: solo el video y la barra de controles.
+        self.act_minimal_interface = A("minimal_interface", "Interfaz mínima", None, "Ctrl+H", checkable=True,
+                                       tooltip="Solo el video y la barra de controles, sin menús, barra de estado "
+                                               "ni lista (Ctrl+H; también en el menú del video)")
+        self.act_minimal_interface.toggled.connect(self._apply_minimal_interface)
 
         # Ayuda.
         A("shortcuts_help", "Atajos de teclado...", self.show_shortcuts_help, "F1")
@@ -282,13 +287,11 @@ class MenusMixin:
         self.menu_zoom = menu_video.addMenu("Zoom")
         zoom_group = QActionGroup(self.menu_zoom)
         zoom_group.setExclusive(True)
-        for label, factor in (
-            ("Ajustar a ventana", 0.0), ("50%", 0.5), ("100%", 1.0), ("150%", 1.5), ("200%", 2.0),
-        ):
+        for label, factor in ZOOM_LEVELS:
             action = QAction(label, self.menu_zoom, checkable=True)
             action.setData(factor)
             action.setChecked(factor == 0.0)
-            action.triggered.connect(lambda _checked, f=factor: self.player.set_video_scale(f))
+            action.triggered.connect(lambda _checked, f=factor: self._set_zoom(f, announce=False))
             zoom_group.addAction(action)
             self.menu_zoom.addAction(action)
 
@@ -310,7 +313,7 @@ class MenusMixin:
         menu_view = menubar.addMenu("&Ver")
         act_toggle_playlist = self.playlist_dock.toggleViewAction()
         act_toggle_playlist.setText("Mostrar lista de reproducción")
-        R.populate(menu_view, [act_toggle_playlist, "remaining_time", "always_on_top"])
+        R.populate(menu_view, [act_toggle_playlist, "minimal_interface", "remaining_time", "always_on_top"])
         self.menu_theme = menu_view.addMenu("Tema")
         self.theme_group = QActionGroup(self)
         self.theme_group.setExclusive(True)
@@ -328,7 +331,7 @@ class MenusMixin:
 
         # Menu contextual del video: las mismas acciones y submenus.
         self.video_context_menu = R.populate(QMenu(self), [
-            "play_pause", "stop", "previous", "next", None, "fullscreen", None,
+            "play_pause", "stop", "previous", "next", None, "fullscreen", "minimal_interface", None,
             self.menu_speed, self.menu_chapters, self.menu_audio_tracks, self.menu_subtitle_tracks,
             self.menu_zoom, self.menu_aspect, self.menu_crop, None, "media_info", "stats_overlay", "always_on_top",
         ])
@@ -396,6 +399,13 @@ class MenusMixin:
         S("A", "Siguiente relación de aspecto", lambda: self._cycle_choice(ASPECT_RATIOS, self._set_aspect_ratio,
                                                                           self.player.get_aspect_ratio()))
         S("C", "Siguiente recorte", lambda: self._cycle_choice(CROP_RATIOS, self._set_crop, self.player.get_crop()))
+        # Como en VLC (UI4, UI7): V subtitulos, B queda para "Agregar marcador" asi que el audio es
+        # Mayus+B; Z zoom; D desentrelazado si/no (los modos siguen en Video > Desentrelazado).
+        S("V", "Siguiente pista de subtítulos", lambda: self._cycle_track("subtitle"))
+        S("Shift+B", "Siguiente pista de audio", lambda: self._cycle_track("audio"))
+        S("Z", "Siguiente zoom", lambda: self._cycle_choice(ZOOM_LEVELS, self._set_zoom, self.player.get_video_scale()))
+        S("D", "Desentrelazado sí / no",
+          lambda: self._set_deinterlace("off" if self.player.get_deinterlace() != "off" else "auto"))
         S(Qt.Key.Key_Up, "Subir volumen", lambda: self._nudge_volume(5))
         S(Qt.Key.Key_Down, "Bajar volumen", lambda: self._nudge_volume(-5))
         # Teclas multimedia del teclado (Windows las manda como WM_APPCOMMAND

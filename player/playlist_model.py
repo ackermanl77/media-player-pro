@@ -15,7 +15,7 @@ el mismo archivo comparten duracion y etiquetas."""
 import os
 
 from PySide6.QtCore import QAbstractListModel, QItemSelectionModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPainter, QPalette
 from PySide6.QtWidgets import QAbstractItemView, QListView
 
 from .formats import format_time, is_audio_file, is_url, path_key
@@ -302,6 +302,27 @@ class PlaylistView(QListView):
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    # Lo que la vista dice cuando no muestra filas (UI5).
+    EMPTY_TEXT = "La lista está vacía.\nArrastra archivos aquí o pulsa Ctrl+O."
+    NO_MATCH_TEXT = "Nada en la lista coincide con la búsqueda."
+
+    def empty_text(self) -> str:
+        """El aviso para una vista sin filas: lista vacia, o una busqueda sin resultados."""
+        model = self.model()
+        if model is None or model.rowCount() > 0:
+            return ""
+        return self.NO_MATCH_TEXT if self._source_count() > 0 else self.EMPTY_TEXT
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        text = self.empty_text()
+        if not text:
+            return
+        painter = QPainter(self.viewport())
+        painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
+        rect = self.viewport().rect().adjusted(16, 16, -16, -16)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, text)
 
     # -- filas fuente <-> vista ------------------------------------------
     def _proxy(self):

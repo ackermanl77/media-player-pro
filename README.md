@@ -173,7 +173,7 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   locales; en audio y streams muestra solo el tiempo), con caché.
 - **Recuerda los ajustes y la lista entre sesiones**: volumen, silencio,
   velocidad, repetir/aleatorio, visualizador, tamaño de subtítulos, zoom,
-  "Siempre visible", ecualizador (activado, preset y valores), tamaño y
+  "Siempre visible", interfaz mínima, ecualizador (activado, preset y valores), tamaño y
   posición de la ventana, el panel de la lista y la última carpeta usada
   (`~/.reproductor_multimedia_pro/settings.json`). La lista de reproducción
   y el elemento actual se restauran al abrir, **sin reproducir solos**
@@ -206,6 +206,9 @@ reproductor, haz doble clic en `run.pyw` (o ejecútalo con `pythonw run.py`).
   resolución, tasa de bits y fotogramas perdidos sobre el video.
 - **Zoom de video** (Ajustar a ventana/50%/100%/150%/200%) y modo
   **"Siempre visible"** (encima de otras ventanas).
+- **Interfaz mínima** (`Ctrl+H`, menú Ver o clic derecho sobre el video): solo
+  el video y la barra de controles, sin menús, barra de estado ni lista, como
+  en VLC. Se recuerda al cerrar; `Ctrl+H` otra vez devuelve lo que estaba.
 - **Acción al terminar la lista** (menú Reproducción): Nada, Salir del
   programa, o en Windows también Apagar el equipo / Hibernar / Reiniciar
   — como el `-sdown` de BS.Player. Las tres muestran una **cuenta regresiva

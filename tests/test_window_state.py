@@ -84,6 +84,44 @@ def test_fullscreen_hides_and_restores_the_status_bar(make_window):
     assert not window.menuBar().isHidden()
 
 
+def test_minimal_interface_hides_menus_status_and_playlist_and_brings_them_back(make_window):
+    """UI6: Ctrl+H (como la Interfaz minima de VLC) deja el video y la barra de controles; se
+    puede quitar desde el menu del video, y al quitarla vuelve lo que estaba visible."""
+    window = make_window()
+    window.show()
+    window.playlist_dock.setVisible(False)  # la lista ya estaba oculta: debe seguir asi al salir
+    action = window.act_minimal_interface
+    assert action.shortcut().toString() == "Ctrl+H" and action in window.video_context_menu.actions()
+    action.trigger()
+    assert window.menuBar().isHidden() and window.statusBar().isHidden() and window.playlist_dock.isHidden()
+    assert window.controls_bar.isVisible()
+    assert window.current_settings().minimal_interface is True
+    action.trigger()
+    assert not window.menuBar().isHidden() and not window.statusBar().isHidden()
+    assert window.playlist_dock.isHidden()
+
+
+def test_minimal_interface_survives_fullscreen_and_a_restart(make_window):
+    window = make_window()
+    window.show()
+    window.act_minimal_interface.setChecked(True)
+    window.toggle_fullscreen()
+    assert not window.act_minimal_interface.isEnabled()
+    window._exit_fullscreen()
+    assert window.menuBar().isHidden() and window.act_minimal_interface.isEnabled()
+
+    # Al cerrar se guarda la ventana completa (lista y estado) y el ajuste la vuelve a aplicar.
+    window._apply_minimal_interface(False)
+    saved = window.current_settings()
+    assert saved.minimal_interface is True
+    restarted = make_window()
+    restarted._apply_settings(saved)
+    assert restarted.act_minimal_interface.isChecked() and restarted.menuBar().isHidden()
+    restarted.act_minimal_interface.setChecked(False)
+    assert not restarted.statusBar().isHidden() and not restarted.playlist_dock.isHidden()
+    assert settings_module.settings_from_dict({"minimal_interface": "yes"}).minimal_interface is False
+
+
 def test_status_messages_go_to_the_osd_while_fullscreen(make_window):
     window = make_window()
     window.show()

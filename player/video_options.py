@@ -56,6 +56,20 @@ def choice_label(choices, value) -> str:
     return next((label for label, v in choices if v == value), str(value))
 
 
+# Video > Zoom y la tecla Z (UI7): 0 = ajustar a la ventana.
+ZOOM_LEVELS = [("Ajustar a ventana", 0.0), ("50%", 0.5), ("100%", 1.0), ("150%", 1.5), ("200%", 2.0)]
+
+
+def next_track(tracks, current):
+    """La pista que sigue a `current` en `tracks` ([(id, nombre)], como las da libVLC, con -1
+    "Desactivar" incluido) -- vuelve a la primera al final; None si no hay a cual pasar (UI4)."""
+    ids = [track_id for track_id, _name in tracks]
+    if len(ids) < 2:
+        return None
+    index = ids.index(current) + 1 if current in ids else 0
+    return tracks[index % len(ids)]
+
+
 def next_choice(choices, current):
     """El valor que sigue a `current` (vuelve al primero al final, o si
     `current` no esta en la lista)."""

@@ -100,6 +100,7 @@ class Settings:
     subtitle_scale: int = 100
     video_scale: float = 0.0
     always_on_top: bool = False
+    minimal_interface: bool = False  # Ver > Interfaz minima (Ctrl+H): sin menus, estado ni lista
     restore_session: bool = True
     equalizer: EqualizerSettings = field(default_factory=EqualizerSettings)
     geometry: str = ""       # QMainWindow.saveGeometry() en base64
@@ -232,6 +233,7 @@ def settings_from_dict(raw) -> Settings:
     s.subtitle_scale = _choice(raw.get("subtitle_scale"), SUBTITLE_SCALES, s.subtitle_scale)
     s.video_scale = _choice(raw.get("video_scale"), VIDEO_SCALES, s.video_scale)
     s.always_on_top = _bool(raw.get("always_on_top"), s.always_on_top)
+    s.minimal_interface = _bool(raw.get("minimal_interface"), s.minimal_interface)
     s.restore_session = _bool(raw.get("restore_session"), s.restore_session)
     s.equalizer = _equalizer_from_dict(raw.get("equalizer"))
     s.geometry = _str(raw.get("geometry"))

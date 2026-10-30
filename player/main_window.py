@@ -70,8 +70,10 @@ from .video_options import (
     CROP_RATIOS,
     DEINTERLACE_LABELS,
     ROTATIONS,
+    ZOOM_LEVELS,
     choice_label,
     next_choice,
+    next_track,
 )
 from .widgets import (  # noqa: F401 -- osd_rect/floating_controls_rect/playlist_owns_key reexportados
     MARKER_BOOKMARK,
@@ -341,6 +343,8 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
             self._restored_geometry = self.restoreGeometry(QByteArray.fromBase64(s.geometry.encode("ascii")))
         if s.window_state:
             self.restoreState(QByteArray.fromBase64(s.window_state.encode("ascii")))
+        # Despues de restoreState: la interfaz minima oculta la lista que este acaba de restaurar.
+        self.act_minimal_interface.setChecked(s.minimal_interface)
 
     def current_settings(self) -> Settings:
         """Ajustes actuales, tal como se guardarian al cerrar."""
@@ -356,6 +360,7 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         )
         s.video_scale = self.player.get_video_scale()
         s.always_on_top = self.act_always_on_top.isChecked()
+        s.minimal_interface = self.act_minimal_interface.isChecked()
         s.restore_session = self.act_restore_session.isChecked()
         s.allow_multiple_windows = self.act_allow_multiple_windows.isChecked()
         s.show_remaining_time = self.act_remaining_time.isChecked()
@@ -548,6 +553,10 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         )
         self.fullscreen.entered.connect(self._on_fullscreen_entered)
         self.fullscreen.exited.connect(lambda: self._set_action_icon(self.act_fullscreen, "fullscreen"))
+        # Ctrl+H no cambia nada en pantalla completa (que ya oculta lo mismo); al salir de ella la
+        # barra de menus vuelve, salvo con la interfaz minima puesta.
+        self.fullscreen.entered.connect(lambda: self.act_minimal_interface.setEnabled(False))
+        self.fullscreen.exited.connect(self._after_fullscreen_exit)
         self.fullscreen_controller = self.fullscreen.controller
         fs_slider = self.fullscreen_controller.slider
         fs_slider.sliderPressed.connect(self._on_slider_pressed)
@@ -1838,6 +1847,28 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         self._check_menu_value(self.menu_aspect, ratio)
         self._show_osd(f"Aspecto: {choice_label(ASPECT_RATIOS, ratio)}")
 
+    def _set_zoom(self, factor: float, announce: bool = True):
+        self.player.set_video_scale(factor)
+        self._check_menu_value(self.menu_zoom, factor)
+        if announce:
+            self._show_osd(f"Zoom: {choice_label(ZOOM_LEVELS, factor)}")
+
+    def _cycle_track(self, kind: str):
+        """V / Mayus+B: la siguiente pista de subtitulos o de audio, con su nombre en pantalla (UI4)."""
+        if kind == "subtitle":
+            tracks, current, select = self.player.subtitle_tracks(), self.player.get_current_subtitle_track(), self._select_subtitle_track
+        else:
+            tracks, current, select = self.player.audio_tracks(), self.player.get_current_audio_track(), self._select_audio_track
+        label = "Subtítulos" if kind == "subtitle" else "Audio"
+        chosen = next_track(list(tracks), current)
+        if chosen is None:
+            self._show_osd(f"{label}: no hay otra pista")
+            return
+        track_id, name = chosen
+        select(track_id)
+        name = name.decode("utf-8", errors="ignore") if isinstance(name, bytes) else str(name)
+        self._show_osd(f"{label}: {name}")
+
     def _set_crop(self, ratio: str):
         self.player.set_crop(ratio)
         self._check_menu_value(self.menu_crop, ratio)
@@ -1900,6 +1931,33 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
 
     def _exit_fullscreen(self):
         self.fullscreen.exit()
+
+    def _after_fullscreen_exit(self):
+        self.act_minimal_interface.setEnabled(True)
+        if self._minimal_saved is not None:
+            self.menuBar().setVisible(False)
+
+    # ------------------------------------------------------ interfaz minima
+    _minimal_saved = None  # (lista visible, barra de estado visible) mientras esta puesta
+
+    def _apply_minimal_interface(self, on: bool):
+        """Interfaz minima (Ctrl+H, como en VLC): solo el video y la barra de controles. Oculta la
+        barra de menus, la de estado y la lista, y al quitarla vuelve lo que estaba visible.
+        isHidden() y no isVisible(): al arrancar se aplica antes de mostrar la ventana."""
+        if on == (self._minimal_saved is not None):
+            return
+        if on:
+            self._minimal_saved = (not self.playlist_dock.isHidden(), not self.statusBar().isHidden())
+            self.playlist_dock.setVisible(False)
+            self.menuBar().setVisible(False)
+            self.statusBar().setVisible(False)
+            self._show_osd("Interfaz mínima: Ctrl+H o clic derecho para volver")
+        else:
+            dock_visible, status_visible = self._minimal_saved
+            self._minimal_saved = None
+            self.menuBar().setVisible(True)
+            self.statusBar().setVisible(status_visible)
+            self.playlist_dock.setVisible(dock_visible)
 
     def _on_fullscreen_entered(self):
         self._set_action_icon(self.act_fullscreen, "fullscreen_exit")
@@ -1964,6 +2022,9 @@ class MainWindow(MenusMixin, DialogsMixin, InputsMixin, EffectsMixin, SourcesMix
         # saveState() en pantalla completa guardarian esa ventana (y el dock
         # oculto), y la proxima vez arrancaria asi.
         self._exit_fullscreen()
+        # Igual con la interfaz minima: la ventana se guarda completa y el ajuste
+        # (minimal_interface) la vuelve a aplicar al arrancar.
+        self._apply_minimal_interface(False)
         self._save_current_position()
         self.save_settings_now()
         self.save_session_now()
